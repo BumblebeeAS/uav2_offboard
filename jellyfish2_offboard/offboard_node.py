@@ -110,22 +110,22 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
-        if self.offboard_setpoint_counter_ < 100:
-            self.publish_traj_setpoint(0.0, 0.0, -10.0, 0.0)
-
         if self.offboard_setpoint_counter_ == 50:
             self.engage_offboard_mode()
             self.arm()
-            self.publish_traj_setpoint(0.0, 0.0, -10.0, 0.0)
+
+        if self.offboard_setpoint_counter_ < 100:
+            self.publish_traj_setpoint(0.0, 0.0, -2.0, 0.0)
 
         if (
             self.offboard_setpoint_counter_ > 100
             and self.offboard_setpoint_counter_ < 300
         ):
-            self.publish_traj_setpoint(5.0, 5.0, -10.0, 0.0)
+            self.publish_traj_setpoint(0.0, 0.0, 0.0, 0.0)
 
         if self.offboard_setpoint_counter_ >= 300:
             self.engage_land_mode()
+
         self.publish_offboard_heartbeat()
         self.offboard_setpoint_counter_ += 1
 
