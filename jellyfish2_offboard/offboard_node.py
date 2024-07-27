@@ -23,6 +23,7 @@ class OffboardNode(Node):
         self.declare_parameter("traj_setpoint_topic", "")
         self.declare_parameter("local_pos_topic", "")
         self.declare_parameter("landing_pos_topic", "")
+        self.offboard_status = False
         self.hover_altitude = self.get_parameter(
             "hover_altitude").get_parameter_value().double_value
         self.vehicle_status_topic = self.get_parameter(
@@ -96,27 +97,33 @@ class OffboardNode(Node):
         PX4 requires that the vehicle is already receiving 
         OffboardControlMode messages before it will arm in offboard mode, 
         or before it will switch to offboard mode when flying
-        """
-        if self.offboard_setpoint_counter_ < 100:
-            self.publish_traj_setpoint(0.0, 0.0,-10.0, 0.0)
-
-        if self.offboard_setpoint_counter_ == 50:
-            self.engage_offboard_mode()
-            self.arm()
-            self.publish_traj_setpoint(0.0, 0.0,-10.0, 0.0)
-
-        if (
-            self.offboard_setpoint_counter_ > 100
-            and self.offboard_setpoint_counter_ < 300
-        ):
-            self.publish_traj_setpoint(5.0, 5.0,-10.0, 0.0)
+        """         
+        if self.offboard_setpoint_counter_ < 300:
+            if not self.offboard_status:
+                self.get_logger().info(
+                    "not in offboard, no setpoint published...."
+                )
+            else:  
+                self.publish_traj_setpoint(0.0, 0.0,-2.0, 0.0)
 
         if self.offboard_setpoint_counter_ >= 300:
-            self.engage_land_mode()
+            if not self.offboard_status:
+                self.get_logger().info(
+                    "not in offboard, land command not set...."
+                )
+            else: 
+                self.engage_land_mode()
+
+        if self.offboard_setpoint_counter_ == 50:
+            self.set_home_location()
+            self.engage_offboard_mode()
+            self.arm()
+
         self.publish_offboard_heartbeat()
         self.offboard_setpoint_counter_ += 1
 
     def vehicle_status_callback(self, msg:VehicleStatus):
+        self.offboard_status = msg.nav_state == 14
         self.get_logger().info(
             f"Vehicle Status Timestamp: {msg.timestamp} Offboard status(14):{msg.nav_state}"
         )
