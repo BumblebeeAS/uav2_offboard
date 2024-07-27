@@ -33,6 +33,7 @@ class OffboardNode(Node):
         self.declare_parameter("traj_setpoint_topic", "")
         self.declare_parameter("local_pos_topic", "")
         self.declare_parameter("landing_pos_topic", "")
+        self.offboard_status = False
         self.hover_altitude = (
             self.get_parameter("hover_altitude").get_parameter_value().double_value
         )
@@ -96,6 +97,7 @@ class OffboardNode(Node):
         self.landing_pos_pub_ = self.create_publisher(
             LandingTargetPose, self.landing_pos_topic, self.qos_profile
         )
+
         self.offboard_setpoint_counter_ = 0
         self.home_lat = 0.0
         self.home_lon = 0.0
@@ -110,8 +112,11 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
+
         if self.offboard_setpoint_counter_ == 50:
+            self.set_home_location()
             self.engage_offboard_mode()
+            self.publish_traj_setpoint(0.0, 0.0, -2.0, 0.0)
             self.arm()
 
         if self.offboard_setpoint_counter_ < 100:
@@ -130,6 +135,7 @@ class OffboardNode(Node):
         self.offboard_setpoint_counter_ += 1
 
     def vehicle_status_callback(self, msg: VehicleStatus):
+        self.offboard_status = msg.nav_state == 14
         self.get_logger().info(
             f"Vehicle Status Timestamp: {msg.timestamp} Offboard status(14):{msg.nav_state}"
         )
