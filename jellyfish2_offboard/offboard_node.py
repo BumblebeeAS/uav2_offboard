@@ -119,16 +119,16 @@ class OffboardNode(Node):
             self.publish_traj_setpoint(0.0, 0.0, -2.0, 0.0)
             self.arm()
 
-        if self.offboard_setpoint_counter_ < 100:
+        if self.offboard_setpoint_counter_ < 300:
             self.publish_traj_setpoint(0.0, 0.0, -2.0, 0.0)
 
         if (
-            self.offboard_setpoint_counter_ > 100
-            and self.offboard_setpoint_counter_ < 300
+            self.offboard_setpoint_counter_ > 300
+            and self.offboard_setpoint_counter_ < 500
         ):
-            self.publish_traj_setpoint(0.0, 0.0, 0.0, 0.0)
+            self.publish_traj_setpoint(0.0, 0.0, -1.0, 0.0)
 
-        if self.offboard_setpoint_counter_ >= 300:
+        if self.offboard_setpoint_counter_ >= 500:
             self.engage_land_mode()
 
         self.publish_offboard_heartbeat()
