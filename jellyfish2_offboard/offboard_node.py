@@ -99,57 +99,56 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
-        if self.offboard_setpoint_counter_ < 300:
-            setpoint_position = [0.0, 0.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = 3.14159
-            setpoint_yaw_speed = 0.1
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
+        # if self.offboard_setpoint_counter_ < 300:
+        #     setpoint_position = [0.0, 0.0, -10.0]
+        #     setpoint_velocity = [2.0, 2.0, 2.0]
+        #     setpoint_acceleration = [2.0, 2.0, 2.0]
+        #     setpoint_jerk = [2.0, 2.0, 2.0]
+        #     setpoint_yaw = 3.14159
+        #     setpoint_yaw_speed = 0.1
+        #     self.publish_traj_setpoint(
+        #         setpoint_position,
+        #         setpoint_velocity,
+        #         setpoint_acceleration,
+        #         setpoint_jerk,
+        #         setpoint_yaw,
+        #         setpoint_yaw_speed,
+        #     )
 
-        if self.offboard_setpoint_counter_ == 50:
-            self.set_home_location()
-            self.engage_offboard_mode()
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
-            self.arm()
+        # if self.offboard_setpoint_counter_ == 50:
+        #     self.set_home_location()
+        #     self.engage_offboard_mode()
+        #     self.publish_traj_setpoint(
+        #         setpoint_position,
+        #         setpoint_velocity,
+        #         setpoint_acceleration,
+        #         setpoint_jerk,
+        #         setpoint_yaw,
+        #         setpoint_yaw_speed,
+        #     )
+        #     self.arm()
 
-        if (
-            self.offboard_setpoint_counter_ > 300
-            and self.offboard_setpoint_counter_ < 600
-        ):
-            setpoint_position = [5.0, 5.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = -1.57
-            setpoint_yaw_speed = 0.1
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
+        # if (
+        #     self.offboard_setpoint_counter_ > 300
+        #     and self.offboard_setpoint_counter_ < 600
+        # ):
+        #     setpoint_position = [5.0, 5.0, -10.0]
+        #     setpoint_velocity = [2.0, 2.0, 2.0]
+        #     setpoint_acceleration = [2.0, 2.0, 2.0]
+        #     setpoint_jerk = [2.0, 2.0, 2.0]
+        #     setpoint_yaw = -1.57
+        #     setpoint_yaw_speed = 0.1
+        #     self.publish_traj_setpoint(
+        #         setpoint_position,
+        #         setpoint_velocity,
+        #         setpoint_acceleration,
+        #         setpoint_jerk,
+        #         setpoint_yaw,
+        #         setpoint_yaw_speed,
+        #     )
 
-
-        if self.offboard_setpoint_counter_ >= 600:
-            self.engage_land_mode()
+        # if self.offboard_setpoint_counter_ >= 600:
+        #     self.engage_land_mode()
 
         self.publish_offboard_heartbeat()
         self.offboard_setpoint_counter_ += 1
