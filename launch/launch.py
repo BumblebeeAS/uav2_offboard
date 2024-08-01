@@ -15,14 +15,12 @@ def generate_launch_description():
         # DEBUG topic names are not set yet, need to look at terminal
         parameters=[
             {
-                "hover_altitude": 10.0,
                 "vehicle_status_topic": "/fmu/out/vehicle_status",
                 "offboard_heartbeat_topic": "/fmu/in/offboard_control_mode",
                 "takeoff_status_topic": "/fmu/out/takeoff_status",
                 "vehicle_command_topic": "/fmu/in/vehicle_command",
                 "traj_setpoint_topic": "/fmu/in/trajectory_setpoint",
                 "local_pos_topic": "/fmu/out/vehicle_local_position",
-                "landing_pos_topic": "landing",
             }
         ],
     )
