@@ -118,7 +118,14 @@ class OffboardNode(Node):
         if self.offboard_setpoint_counter_ == 50:
             self.set_home_location()
             self.engage_offboard_mode()
-            self.publish_traj_setpoint(0.0, 0.0, -2.0, 0.0)
+            self.publish_traj_setpoint(
+                setpoint_position,
+                setpoint_velocity,
+                setpoint_acceleration,
+                setpoint_jerk,
+                setpoint_yaw,
+                setpoint_yaw_speed,
+            )
             self.arm()
 
         if (
