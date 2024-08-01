@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from px4_msgs.msg import VehicleStatus, OffboardControlMode
-from px4_msgs.msg import TakeoffStatus, VehicleCommand, VehicleCommandAck
-from px4_msgs.msg import TrajectorySetpoint, VehicleLocalPosition, LandingTargetPose
-import numpy as np
+
+from px4_msgs.msg import (
+    LandingTargetPose,
+    OffboardControlMode,
+    TakeoffStatus,
+    TrajectorySetpoint,
+    VehicleCommand,
+    VehicleCommandAck,
+    VehicleLocalPosition,
+    VehicleStatus,
+)
 
 
 class OffboardNode(Node):
@@ -108,7 +116,9 @@ class OffboardNode(Node):
             )
 
         if self.offboard_setpoint_counter_ == 50:
+            self.set_home_location()
             self.engage_offboard_mode()
+            self.publish_traj_setpoint(0.0, 0.0, -2.0, 0.0)
             self.arm()
 
         if (
@@ -133,19 +143,23 @@ class OffboardNode(Node):
 
         if self.offboard_setpoint_counter_ >= 600:
             self.engage_land_mode()
+
         self.publish_offboard_heartbeat()
         self.offboard_setpoint_counter_ += 1
 
     def vehicle_status_callback(self, msg: VehicleStatus):
+        self.offboard_status = msg.nav_state == 14
         self.get_logger().info(
             f"Vehicle Status Timestamp: {msg.timestamp} Offboard status(14):{msg.nav_state}"
         )
 
     def takeoff_status_callback(self, msg: TakeoffStatus):
+    def takeoff_status_callback(self, msg: TakeoffStatus):
         self.get_logger().info(
             f"TAKEOFF Timestamp: {msg.timestamp} Status:{msg.takeoff_state}"
         )
 
+    def local_pos_callback(self, msg: VehicleLocalPosition):
     def local_pos_callback(self, msg: VehicleLocalPosition):
         self.home_lat = msg.ref_lat
         self.home_lon = msg.ref_lon
