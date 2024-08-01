@@ -154,12 +154,10 @@ class OffboardNode(Node):
         )
 
     def takeoff_status_callback(self, msg: TakeoffStatus):
-    def takeoff_status_callback(self, msg: TakeoffStatus):
         self.get_logger().info(
             f"TAKEOFF Timestamp: {msg.timestamp} Status:{msg.takeoff_state}"
         )
 
-    def local_pos_callback(self, msg: VehicleLocalPosition):
     def local_pos_callback(self, msg: VehicleLocalPosition):
         self.home_lat = msg.ref_lat
         self.home_lon = msg.ref_lon
