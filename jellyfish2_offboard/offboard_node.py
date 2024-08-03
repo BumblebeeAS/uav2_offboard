@@ -6,6 +6,8 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from px4_msgs.msg import (
     LandingTargetPose,
+    VehicleTrajectoryBezier,
+    TrajectoryBezier,
     OffboardControlMode,
     TakeoffStatus,
     TrajectorySetpoint,
@@ -30,6 +32,7 @@ class OffboardNode(Node):
         self.declare_parameter("takeoff_status_topic", "")
         self.declare_parameter("vehicle_command_topic", "")
         self.declare_parameter("traj_setpoint_topic", "")
+        self.declare_parameter("traj_bezier_topic", "")
         self.declare_parameter("local_pos_topic", "")
         self.vehicle_status_topic = (
             self.get_parameter("vehicle_status_topic")
@@ -53,6 +56,9 @@ class OffboardNode(Node):
         )
         self.traj_setpoint_topic = (
             self.get_parameter("traj_setpoint_topic").get_parameter_value().string_value
+        )
+        self.traj_bezier_topic = (
+            self.get_parameter("traj_bezier_topic").get_parameter_value().string_value
         )
         self.local_pos_topic = (
             self.get_parameter("local_pos_topic").get_parameter_value().string_value
@@ -79,6 +85,9 @@ class OffboardNode(Node):
         self.traj_setpoint_pub_ = self.create_publisher(
             TrajectorySetpoint, self.traj_setpoint_topic, self.qos_profile
         )
+        self.traj_bezier_pub_ = self.create_publisher(
+            VehicleTrajectoryBezier, self.traj_bezier_topic, self.qos_profile
+        )
         self.local_pos_sub_ = self.create_subscription(
             VehicleLocalPosition,
             self.local_pos_topic,
@@ -99,13 +108,13 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
-        if self.offboard_setpoint_counter_ < 300:
-            setpoint_position = [0.0, 0.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = 3.14159
-            setpoint_yaw_speed = 0.1
+        if self.offboard_setpoint_counter_ <= 100:
+            setpoint_position = [0.0, 0.0, -2.0]
+            setpoint_velocity = [0.0, 0.0, 0.0]
+            setpoint_acceleration = [0.0, 0.0, 0.0]
+            setpoint_jerk = [0.0, 0.0, 0.0]
+            setpoint_yaw = 0.0
+            setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
                 setpoint_velocity,
@@ -115,9 +124,18 @@ class OffboardNode(Node):
                 setpoint_yaw_speed,
             )
 
+        if self.offboard_setpoint_counter_ == 150:
+            self.publish_traj_bezier()
+
         if self.offboard_setpoint_counter_ == 50:
             self.set_home_location()
             self.engage_offboard_mode()
+            setpoint_position = [0.0, 0.0, -2.0]
+            setpoint_velocity = [0.0, 0.0, 0.0]
+            setpoint_acceleration = [0.0, 0.0, 0.0]
+            setpoint_jerk = [0.0, 0.0, 0.0]
+            setpoint_yaw = 0.0
+            setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
                 setpoint_velocity,
@@ -128,27 +146,26 @@ class OffboardNode(Node):
             )
             self.arm()
 
-        if (
-            self.offboard_setpoint_counter_ > 300
-            and self.offboard_setpoint_counter_ < 600
-        ):
-            setpoint_position = [5.0, 5.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = -1.57
-            setpoint_yaw_speed = 0.1
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
+        # if (
+        #     self.offboard_setpoint_counter_ > 300
+        #     and self.offboard_setpoint_counter_ < 600
+        # ):
+        # setpoint_position = [5.0, 5.0, -10.0]
+        # setpoint_velocity = [2.0, 2.0, 2.0]
+        # setpoint_acceleration = [2.0, 2.0, 2.0]
+        # setpoint_jerk = [2.0, 2.0, 2.0]
+        # setpoint_yaw = -1.57
+        # setpoint_yaw_speed = 0.1
+        # self.publish_traj_setpoint(
+        #     setpoint_position,
+        #     setpoint_velocity,
+        #     setpoint_acceleration,
+        #     setpoint_jerk,
+        #     setpoint_yaw,
+        #     setpoint_yaw_speed,
+        # )
 
-
-        if self.offboard_setpoint_counter_ >= 600:
+        if self.offboard_setpoint_counter_ >= 300:
             self.engage_land_mode()
 
         self.publish_offboard_heartbeat()
@@ -182,6 +199,67 @@ class OffboardNode(Node):
         # Debug need to check whether home location works
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_HOME, param1=1.0)
         self.get_logger().info("Set home location...")
+
+    def publish_traj_bezier(
+            self
+    ):
+        """
+        # Vehicle Waypoints Trajectory description. See also MAVLink MAV_TRAJECTORY_REPRESENTATION msg
+        # The topic vehicle_trajectory_bezier is used to send a smooth flight path from the
+        # companion computer / avoidance module to the position controller.
+
+        uint64 timestamp		# time since system start (microseconds)
+
+        uint8 POINT_0 = 0
+        uint8 POINT_1 = 1
+        uint8 POINT_2 = 2
+        uint8 POINT_3 = 3
+        uint8 POINT_4 = 4
+
+        uint8 NUMBER_POINTS = 5
+
+        TrajectoryBezier[5] control_points
+        uint8 bezier_order
+
+        # TOPICS vehicle_trajectory_bezier
+                # Bezier Trajectory description. See also Mavlink TRAJECTORY msg
+                # The topic trajectory_bezier describe each waypoint defined in vehicle_trajectory_bezier
+
+                uint64 timestamp		# time since system start (microseconds)
+
+                float32[3] position     # local position x,y,z (metres)
+                float32 yaw             # yaw angle (rad)
+                float32 delta           # time it should take to get to this waypoint, if this is the final waypoint (seconds)
+        """
+        waypoints = []
+        point1 = TrajectoryBezier()
+        point1.position = [0.0, 0.0, -2.0]
+        point1.yaw = 0.6
+        waypoints.append(point1)
+        point2 = TrajectoryBezier()
+        point2.position = [0.0, 0.0, -4.0]
+        point2.yaw = 1.2
+        waypoints.append(point2)
+        point3 = TrajectoryBezier()
+        point3.position = [0.0, 0.0, -6.0]
+        point3.yaw = 1.8
+        waypoints.append(point3)
+        point4 = TrajectoryBezier()
+        point4.position = [0.0, 0.0, -8.0]
+        point4.yaw = 2.4
+        waypoints.append(point4)
+        point5 = TrajectoryBezier()
+        point5.position = [0.0, 0.0, -10.0]
+        point5.delta = 5.0
+        waypoints.append(point5)
+        msg = VehicleTrajectoryBezier()
+        msg.control_points = waypoints
+        msg.bezier_order = 4
+        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        self.traj_bezier_pub_.publish(msg)
+        self.get_logger().info(
+            "Publishing traj bezier......"
+        )
 
     # TODO Implement waypointing in the future
     # TODO Keep as an arbitary value to test states

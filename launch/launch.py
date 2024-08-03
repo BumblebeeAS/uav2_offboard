@@ -21,6 +21,7 @@ def generate_launch_description():
                 "vehicle_command_topic": "/fmu/in/vehicle_command",
                 "traj_setpoint_topic": "/fmu/in/trajectory_setpoint",
                 "local_pos_topic": "/fmu/out/vehicle_local_position",
+                "traj_bezier_topic": "/fmu/in/vehicle_trajectory_bezier"
             }
         ],
     )
