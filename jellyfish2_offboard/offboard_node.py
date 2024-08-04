@@ -5,12 +5,10 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 import time
 from px4_msgs.msg import (
-    LandingTargetPose,
     OffboardControlMode,
     TakeoffStatus,
     TrajectorySetpoint,
     VehicleCommand,
-    VehicleCommandAck,
     VehicleLocalPosition,
     VehicleStatus,
     TrajectoryBezier,
@@ -103,9 +101,10 @@ class OffboardNode(Node):
         self.y = 0.0
         self.z = 0.0
         self.og_z = 0.0
+
         self.start_time = 0.0
-        self.target_pose_z = -30.0
         
+        self.target_pose_z = -10.0
         self.setpoint_pose = [self.x, self.y, self.target_pose_z] # target pose in NED
         self.setpoint_velocity = [0.0, 0.0, 1.0]
         self.setpoint_acceleration = [float("NaN"), float("NaN"), float("NaN")]
@@ -124,6 +123,13 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """ 
+        self.get_logger().info(
+            f"Position:\n"
+            f"x: {self.x}\n"
+            f"y: {self.y}\n"
+            f"z: {self.z}\n"
+        )
+
         if self.offboard_setpoint_counter_ == 0:
             self.start_time = self.get_clock().now().nanoseconds
         
@@ -138,13 +144,13 @@ class OffboardNode(Node):
                 float("NaN") 
             )
 
-        self.get_logger().info(
-            f"Position:\n"
-            f"x: {self.x}\n"
-            f"y: {self.y}\n"
-            f"z: {self.z}\n"
-        )
+        if self.offboard_setpoint_counter_ == 50:
+            self.set_home_location()
+            self.engage_offboard_mode()
+            self.start_time = self.get_clock().now().nanoseconds
+            self.arm()
 
+        # fly using dt from start of publishing setpoint
         if self.offboard_setpoint_counter_ >= 51 and self.offboard_setpoint_counter_ < 500:
             current_time = self.get_clock().now().nanoseconds
             time_elapsed = (current_time - self.start_time) / 1e9
@@ -152,8 +158,10 @@ class OffboardNode(Node):
             self.get_logger().info(
                 f"Time diff:\n{time_elapsed}\n"
             )
+
             if self.z > self.target_pose_z - 0.5:
-                self.og_z = (self.og_z - self.setpoint_velocity[2] * (time_elapsed)) % -1e9
+                new_pos = self.og_z - (self.setpoint_velocity[2] * time_elapsed)
+                self.og_z = new_pos % (1e9 if new_pos > 0 else -1e9)
                 if -self.target_pose_z + self.z < 0.7:
                     self.publish_traj_setpoint(
                         [self.x, self.y, self.target_pose_z], # final setpoint
@@ -174,10 +182,12 @@ class OffboardNode(Node):
                         self.setpoint_yaw_speed,
                     )
 
+        # fly by spamming and expecting undershoot then publishing the correction
+        # doesnt seem like the vel is being respected
         # if self.offboard_setpoint_counter_ < 300:
-        #     if 30 + self.z < 1.7:
+        #     if -self.target_pose_z + self.z < 0.7:
         #         self.publish_traj_setpoint(
-        #             [self.x, self.y, -30.0],
+        #             [self.x, self.y, self.target_pose_z],
         #             [float("NaN"), float("NaN"), float("NaN")],
         #             [float("NaN"), float("NaN"), float("NaN")],
         #             self.setpoint_jerk,
@@ -186,37 +196,13 @@ class OffboardNode(Node):
         #         )  
         #     else:
         #         self.publish_traj_setpoint(
-        #             [self.x, self.y, -30.0],
+        #             [self.x, self.y, self.target_pose_z - self.setpoint_velocity[2]],
         #             self.setpoint_velocity,
         #             [float("NaN"), float("NaN"), float("NaN")],
         #             self.setpoint_jerk,
         #             self.setpoint_yaw,
         #             self.setpoint_yaw_speed,
         #         )
-
-        # if self.offboard_setpoint_counter_ > 300 and self.z >= -25.0:
-        #     self.publish_traj_setpoint(
-        #         [self.x, self.y, -25.0],
-        #         [float("NaN"), float("NaN"), float("NaN")],
-        #         [float("NaN"), float("NaN"), float("NaN")],
-        #         self.setpoint_jerk,
-        #         self.setpoint_yaw,
-        #         self.setpoint_yaw_speed,
-        #     ) 
-
-        if self.offboard_setpoint_counter_ == 50:
-            self.set_home_location()
-            self.engage_offboard_mode()
-            # self.publish_traj_setpoint(
-            #     self.setpoint_pose,
-            #     self.setpoint_velocity,
-            #     self.setpoint_acceleration,
-            #     self.setpoint_jerk,
-            #     self.setpoint_yaw,
-            #     self.setpoint_yaw_speed,
-            # )
-            self.start_time = self.get_clock().now().nanoseconds
-            self.arm()
 
         # if (
         #     self.offboard_setpoint_counter_ > 300
@@ -280,7 +266,8 @@ class OffboardNode(Node):
     def publish_traj_setpoint(
         self, position, velocity, acceleration, jerk, yaw, yaw_speed
     ):
-        """# Trajectory setpoint in NED frame
+        """
+        # Trajectory setpoint in NED frame
         # Input to PID position controller.
         # Needs to be kinematically consistent and feasible for smooth flight.
         # setting a value to NaN means the state should not be controlled
