@@ -86,10 +86,6 @@ class OffboardNode(Node):
             self.qos_profile,
         )
         self.offboard_setpoint_counter_ = 0
-        self.home_lat = 0.0
-        self.home_lon = 0.0
-        self.home_alt = 0.0
-        self.set_home_location()
         self.timer_ = self.create_timer(0.1, self.timer_callback)
 
     def timer_callback(self):
@@ -99,13 +95,13 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
-        if self.offboard_setpoint_counter_ < 300:
+        if self.offboard_setpoint_counter_ < 50:
             setpoint_position = [0.0, 0.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = 3.14159
-            setpoint_yaw_speed = 0.1
+            setpoint_velocity = [0.0, 0.0, 0.0]
+            setpoint_acceleration = [0.0, 0.0, 0.0]
+            setpoint_jerk = [0.0, 0.0, 0.0]
+            setpoint_yaw = 0.0
+            setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
                 setpoint_velocity,
@@ -114,10 +110,17 @@ class OffboardNode(Node):
                 setpoint_yaw,
                 setpoint_yaw_speed,
             )
+            self.publish_position_offboard()
 
         if self.offboard_setpoint_counter_ == 50:
             self.set_home_location()
             self.engage_offboard_mode()
+            setpoint_position = [0.0, 0.0, -10.0]
+            setpoint_velocity = [0.0, 0.0, 0.0]
+            setpoint_acceleration = [0.0, 0.0, 0.0]
+            setpoint_jerk = [0.0, 0.0, 0.0]
+            setpoint_yaw = 0.0
+            setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
                 setpoint_velocity,
@@ -127,17 +130,15 @@ class OffboardNode(Node):
                 setpoint_yaw_speed,
             )
             self.arm()
+            self.publish_position_offboard()
 
-        if (
-            self.offboard_setpoint_counter_ > 300
-            and self.offboard_setpoint_counter_ < 600
-        ):
-            setpoint_position = [5.0, 5.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = -1.57
-            setpoint_yaw_speed = 0.1
+        if self.offboard_setpoint_counter_ > 50 and self.offboard_setpoint_counter_<= 100:
+            setpoint_position = [0.0, 0.0, -10.0]
+            setpoint_velocity = [0.0, 0.0, 0.0]
+            setpoint_acceleration = [0.0, 0.0, 0.0]
+            setpoint_jerk = [0.0, 0.0, 0.0]
+            setpoint_yaw = 0.0
+            setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
                 setpoint_velocity,
@@ -146,12 +147,49 @@ class OffboardNode(Node):
                 setpoint_yaw,
                 setpoint_yaw_speed,
             )
+            self.publish_position_offboard()
 
+        if (
+            self.offboard_setpoint_counter_ > 100
+            and self.offboard_setpoint_counter_ < 600
+        ):
+            setpoint_position = [10.0, 10.0, -10.0]
+            setpoint_velocity = [2.0, 2.0, 2.0]
+            setpoint_acceleration = [0.0, 0.0, 0.0]
+            setpoint_jerk = [0.0, 0.0, 0.0]
+            setpoint_yaw = 0.0
+            setpoint_yaw_speed = 0.0
+            self.publish_traj_setpoint(
+                setpoint_position,
+                setpoint_velocity,
+                setpoint_acceleration,
+                setpoint_jerk,
+                setpoint_yaw,
+                setpoint_yaw_speed,
+            )
+            self.publish_velocity_offboard()
+
+        # if (
+        #     self.offboard_setpoint_counter_ > 300
+        #     and self.offboard_setpoint_counter_ < 600
+        # ):
+        #     setpoint_position = [5.0, 5.0, -10.0]
+        #     setpoint_velocity = [0.0, 0.0, 0.0]
+        #     setpoint_acceleration = [0.0, 0.0, 0.0]
+        #     setpoint_jerk = [0.0, 0.0, 0.0]
+        #     setpoint_yaw = -1.57
+        #     setpoint_yaw_speed = 0.1
+        #     self.publish_traj_setpoint(
+        #         setpoint_position,
+        #         setpoint_velocity,
+        #         setpoint_acceleration,
+        #         setpoint_jerk,
+        #         setpoint_yaw,
+        #         setpoint_yaw_speed,
+        #     )
 
         if self.offboard_setpoint_counter_ >= 600:
             self.engage_land_mode()
-
-        self.publish_offboard_heartbeat()
         self.offboard_setpoint_counter_ += 1
 
     def vehicle_status_callback(self, msg: VehicleStatus):
@@ -214,13 +252,13 @@ class OffboardNode(Node):
         msg.yawspeed = yaw_speed
         self.traj_setpoint_pub_.publish(msg)
         self.get_logger().info(
-            f"Traj setpoint sent position"
-            f"{msg.position}\n"
-            f"velocity:{msg.velocity}\n"
-            f"acceleration:{msg.acceleration}\n"
-            f"jerk:{msg.jerk}\n"
-            f"yaw:{msg.yaw}\n"
-            f"msg.yaw_speed{msg.yawspeed}\n"
+            f"Traj setpoint sent position \n"
+            f" {msg.position}\n"
+            f"velocity: {msg.velocity}\n"
+            f"acceleration: {msg.acceleration}\n"
+            f"jerk: {msg.jerk}\n"
+            f"yaw: {msg.yaw}\n"
+            f"yaw_speed {msg.yawspeed}\n"
         )
 
     def publish_vehicle_command(self, command, **params) -> None:
@@ -256,11 +294,23 @@ class OffboardNode(Node):
         )
         self.get_logger().info("Disarm command sent....")
 
-    def publish_offboard_heartbeat(self):
+    def publish_position_offboard(self):
         """Publish offboard heartbeat."""
         msg = OffboardControlMode()
         msg.position = True
         msg.velocity = False
+        msg.acceleration = False
+        msg.attitude = False
+        msg.body_rate = False
+        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        self.offboard_heartbeat_pub_.publish(msg)
+        self.get_logger().info("Publishing offboard heartbeat....")
+
+    def publish_velocity_offboard(self):
+        """Publish offboard heartbeat."""
+        msg = OffboardControlMode()
+        msg.position = False
+        msg.velocity = True
         msg.acceleration = False
         msg.attitude = False
         msg.body_rate = False
