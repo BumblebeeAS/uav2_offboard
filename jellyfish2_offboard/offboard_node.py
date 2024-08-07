@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
+import time
+
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-import time
+
 from px4_msgs.msg import (
     OffboardControlMode,
     TakeoffStatus,
+    TrajectoryBezier,
     TrajectorySetpoint,
     VehicleCommand,
     VehicleLocalPosition,
     VehicleStatus,
-    TrajectoryBezier,
-    VehicleTrajectoryBezier
+    VehicleTrajectoryBezier,
 )
 
 
@@ -59,7 +61,9 @@ class OffboardNode(Node):
             self.get_parameter("local_pos_topic").get_parameter_value().string_value
         )
         self.veh_traj_bezier_topic = (
-            self.get_parameter("veh_traj_bezier_topic").get_parameter_value().string_value
+            self.get_parameter("veh_traj_bezier_topic")
+            .get_parameter_value()
+            .string_value
         )
 
         self.vehicle_status_sub_ = self.create_subscription(
@@ -96,22 +100,21 @@ class OffboardNode(Node):
         self.home_lat = 0.0
         self.home_lon = 0.0
         self.home_alt = 0.0
-       
+
         self.x = 0.0
         self.y = 0.0
         self.z = 0.0
         self.og_z = 0.0
 
         self.start_time = 0.0
-        
+
         self.target_pose_z = -10.0
-        self.setpoint_pose = [self.x, self.y, self.target_pose_z] # target pose in NED
+        self.setpoint_pose = [self.x, self.y, self.target_pose_z]  # target pose in NED
         self.setpoint_velocity = [0.0, 0.0, 1.0]
         self.setpoint_acceleration = [float("NaN"), float("NaN"), float("NaN")]
         self.setpoint_jerk = [float("NaN"), float("NaN"), float("NaN")]
         self.setpoint_yaw = float("NaN")
         self.setpoint_yaw_speed = float("NaN")
-
 
         self.set_home_location()
         self.timer_ = self.create_timer(0.1, self.timer_callback)
@@ -122,17 +125,14 @@ class OffboardNode(Node):
         PX4 requires that the vehicle is already receiving
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
-        """ 
+        """
         self.get_logger().info(
-            f"Position:\n"
-            f"x: {self.x}\n"
-            f"y: {self.y}\n"
-            f"z: {self.z}\n"
+            f"Position:\n" f"x: {self.x}\n" f"y: {self.y}\n" f"z: {self.z}\n"
         )
 
         if self.offboard_setpoint_counter_ == 0:
             self.start_time = self.get_clock().now().nanoseconds
-        
+
         if self.offboard_setpoint_counter_ == 1:
             self.og_z = self.z
             self.publish_traj_setpoint(
@@ -141,7 +141,7 @@ class OffboardNode(Node):
                 [float("NaN"), float("NaN"), float("NaN")],
                 [float("NaN"), float("NaN"), float("NaN")],
                 float("NaN"),
-                float("NaN") 
+                float("NaN"),
             )
 
         if self.offboard_setpoint_counter_ == 50:
@@ -151,36 +151,61 @@ class OffboardNode(Node):
             self.arm()
 
         # fly using dt from start of publishing setpoint
-        if self.offboard_setpoint_counter_ >= 51 and self.offboard_setpoint_counter_ < 500:
-            current_time = self.get_clock().now().nanoseconds
-            time_elapsed = (current_time - self.start_time) / 1e9
-            self.start_time = current_time
-            self.get_logger().info(
-                f"Time diff:\n{time_elapsed}\n"
-            )
+        # if (
+        #     self.offboard_setpoint_counter_ >= 51
+        #     and self.offboard_setpoint_counter_ < 500
+        # ):
+        #     current_time = self.get_clock().now().nanoseconds
+        #     time_elapsed = (current_time - self.start_time) / 1e9
+        #     self.start_time = current_time
+        #     self.get_logger().info(f"Time diff:\n{time_elapsed}\n")
 
+        #     if self.z > self.target_pose_z - 0.5:
+        #         new_pos = self.og_z - (self.setpoint_velocity[2] * time_elapsed)
+        #         self.og_z = new_pos % (1e9 if new_pos > 0 else -1e9)
+        #         if -self.target_pose_z + self.z < 0.7:
+        #             self.publish_traj_setpoint(
+        #                 [self.x, self.y, self.target_pose_z],  # final setpoint
+        #                 [float("NaN"), float("NaN"), 0.0],
+        #                 [float("NaN"), float("NaN"), float("NaN")],
+        #                 self.setpoint_jerk,
+        #                 self.setpoint_yaw,
+        #                 self.setpoint_yaw_speed,
+        #             )
+        #         else:
+        #             self.setpoint_pose = [self.x, self.y, self.og_z]
+        #             self.publish_traj_setpoint(
+        #                 self.setpoint_pose,
+        #                 self.setpoint_velocity,
+        #                 self.setpoint_acceleration,
+        #                 self.setpoint_jerk,
+        #                 self.setpoint_yaw,
+        #                 self.setpoint_yaw_speed,
+        #             )
+
+        # fly using velocity only
+        if (
+            self.offboard_setpoint_counter_ >= 51
+            and self.offboard_setpoint_counter_ < 500
+        ):
             if self.z > self.target_pose_z - 0.5:
-                new_pos = self.og_z - (self.setpoint_velocity[2] * time_elapsed)
-                self.og_z = new_pos % (1e9 if new_pos > 0 else -1e9)
-                if -self.target_pose_z + self.z < 0.7:
-                    self.publish_traj_setpoint(
-                        [self.x, self.y, self.target_pose_z], # final setpoint
-                        [float("NaN"), float("NaN"), 0.0],
-                        [float("NaN"), float("NaN"), float("NaN")],
-                        self.setpoint_jerk,
-                        self.setpoint_yaw,
-                        self.setpoint_yaw_speed,
-                    )  
-                else:
-                    self.setpoint_pose = [self.x, self.y, self.og_z]
-                    self.publish_traj_setpoint(
-                        self.setpoint_pose,
-                        self.setpoint_velocity,
-                        self.setpoint_acceleration,
-                        self.setpoint_jerk,
-                        self.setpoint_yaw,
-                        self.setpoint_yaw_speed,
-                    )
+                self.publish_traj_setpoint(
+                    [float("NaN"), float("NaN"), float("NaN")],
+                    [0.0, 0.0, -2.0],
+                    self.setpoint_acceleration,
+                    self.setpoint_jerk,
+                    self.setpoint_yaw,
+                    self.setpoint_yaw_speed,
+                )
+            else:
+                self.publish_traj_setpoint(
+                    [float("NaN"), float("NaN"), float("NaN")],
+                    [float("NaN"), float("NaN"), float("NaN")],
+                    [float("NaN"), float("NaN"), float("NaN")],
+                    [float("NaN"), float("NaN"), float("NaN")],
+                    self.setpoint_yaw,
+                    self.setpoint_yaw_speed,
+                )
 
         # fly by spamming and expecting undershoot then publishing the correction
         # doesnt seem like the vel is being respected
@@ -193,7 +218,7 @@ class OffboardNode(Node):
         #             self.setpoint_jerk,
         #             self.setpoint_yaw,
         #             self.setpoint_yaw_speed,
-        #         )  
+        #         )
         #     else:
         #         self.publish_traj_setpoint(
         #             [self.x, self.y, self.target_pose_z - self.setpoint_velocity[2]],
@@ -303,7 +328,7 @@ class OffboardNode(Node):
             f"yaw_speed{msg.yawspeed}\n"
         )
         self.traj_setpoint_pub_.publish(msg)
-    
+
     def publish_traj_bezier(self):
         """
         # Vehicle Waypoints Trajectory description. See also MAVLink MAV_TRAJECTORY_REPRESENTATION msg
@@ -340,21 +365,31 @@ class OffboardNode(Node):
         msg.timestamp = int(time.time() * 1e6)  # Convert to microseconds
 
         # Set the bezier order
-        msg.bezier_order = 4 # Example order, adjust as needed
+        msg.bezier_order = 4  # Example order, adjust as needed
 
         # Define control points (example values)
         control_points = [
-            TrajectoryBezier(timestamp=msg.timestamp, position=[0.0, 0.0, 0.0], yaw=0.0),
-            TrajectoryBezier(timestamp=msg.timestamp, position=[0.0, 0.0, -2.0], yaw=0.0),
-            TrajectoryBezier(timestamp=msg.timestamp, position=[0.0, 0.0, -4.0], yaw=0.0),
-            TrajectoryBezier(timestamp=msg.timestamp, position=[0.0, 0.0, -6.0], yaw=0.0),
-            TrajectoryBezier(timestamp=msg.timestamp, position=[0.0, 0.0, -8.0], yaw=0.0, delta=4.0)
+            TrajectoryBezier(
+                timestamp=msg.timestamp, position=[0.0, 0.0, 0.0], yaw=0.0
+            ),
+            TrajectoryBezier(
+                timestamp=msg.timestamp, position=[0.0, 0.0, -2.0], yaw=0.0
+            ),
+            TrajectoryBezier(
+                timestamp=msg.timestamp, position=[0.0, 0.0, -4.0], yaw=0.0
+            ),
+            TrajectoryBezier(
+                timestamp=msg.timestamp, position=[0.0, 0.0, -6.0], yaw=0.0
+            ),
+            TrajectoryBezier(
+                timestamp=msg.timestamp, position=[0.0, 0.0, -8.0], yaw=0.0, delta=4.0
+            ),
         ]
 
         msg.control_points = control_points
 
         self.veh_traj_bezier_pub.publish(msg)
-        self.get_logger().info('Publishing trajectory bezier')
+        self.get_logger().info("Publishing trajectory bezier")
 
     def publish_vehicle_command(self, command, **params) -> None:
         """Publish a vehicle command."""
@@ -393,7 +428,7 @@ class OffboardNode(Node):
         """Publish offboard heartbeat."""
         msg = OffboardControlMode()
         msg.position = True
-        msg.velocity = False
+        msg.velocity = True
         msg.acceleration = False
         msg.attitude = False
         msg.body_rate = False
