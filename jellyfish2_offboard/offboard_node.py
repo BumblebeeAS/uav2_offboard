@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import numpy as np
 import rclpy
+from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
@@ -79,6 +80,9 @@ class OffboardNode(Node):
         self.traj_setpoint_pub_ = self.create_publisher(
             TrajectorySetpoint, self.traj_setpoint_topic, self.qos_profile
         )
+        self.mock_detection_pub_ = self.create_publisher(
+            PoseStamped, "/uav2/aruco_pose", 1
+        )
         self.local_pos_sub_ = self.create_subscription(
             VehicleLocalPosition,
             self.local_pos_topic,
@@ -99,57 +103,6 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
-        # if self.offboard_setpoint_counter_ < 300:
-        #     setpoint_position = [0.0, 0.0, -10.0]
-        #     setpoint_velocity = [2.0, 2.0, 2.0]
-        #     setpoint_acceleration = [2.0, 2.0, 2.0]
-        #     setpoint_jerk = [2.0, 2.0, 2.0]
-        #     setpoint_yaw = 3.14159
-        #     setpoint_yaw_speed = 0.1
-        #     self.publish_traj_setpoint(
-        #         setpoint_position,
-        #         setpoint_velocity,
-        #         setpoint_acceleration,
-        #         setpoint_jerk,
-        #         setpoint_yaw,
-        #         setpoint_yaw_speed,
-        #     )
-
-        # if self.offboard_setpoint_counter_ == 50:
-        #     self.set_home_location()
-        #     self.engage_offboard_mode()
-        #     self.publish_traj_setpoint(
-        #         setpoint_position,
-        #         setpoint_velocity,
-        #         setpoint_acceleration,
-        #         setpoint_jerk,
-        #         setpoint_yaw,
-        #         setpoint_yaw_speed,
-        #     )
-        #     self.arm()
-
-        # if (
-        #     self.offboard_setpoint_counter_ > 300
-        #     and self.offboard_setpoint_counter_ < 600
-        # ):
-        #     setpoint_position = [5.0, 5.0, -10.0]
-        #     setpoint_velocity = [2.0, 2.0, 2.0]
-        #     setpoint_acceleration = [2.0, 2.0, 2.0]
-        #     setpoint_jerk = [2.0, 2.0, 2.0]
-        #     setpoint_yaw = -1.57
-        #     setpoint_yaw_speed = 0.1
-        #     self.publish_traj_setpoint(
-        #         setpoint_position,
-        #         setpoint_velocity,
-        #         setpoint_acceleration,
-        #         setpoint_jerk,
-        #         setpoint_yaw,
-        #         setpoint_yaw_speed,
-        #     )
-
-        # if self.offboard_setpoint_counter_ >= 600:
-        #     self.engage_land_mode()
-
         self.publish_offboard_heartbeat()
         self.offboard_setpoint_counter_ += 1
 
@@ -168,6 +121,24 @@ class OffboardNode(Node):
         self.home_lat = msg.ref_lat
         self.home_lon = msg.ref_lon
         self.home_alt = msg._ref_alt
+
+        mmm = PoseStamped()
+        # Fill in the header
+        mmm.header.stamp = self.get_clock().now().to_msg()  # Use current time
+        mmm.header.frame_id = "uav2/camera"
+
+        # Fill in the pose
+        mmm.pose.position.x = 1.0
+        mmm.pose.position.y = 2.0
+        mmm.pose.position.z = 3.0
+
+        mmm.pose.orientation.x = 0.0
+        mmm.pose.orientation.y = 0.0
+        mmm.pose.orientation.z = 0.0
+        mmm.pose.orientation.w = 1.0
+
+        # self.mock_detection_pub_.publish(mmm)
+        # self.get_logger().info(f"Detected at: {mmm}")
         # self.get_logger().info(
         #     f"Local pos Timestamp: {msg.timestamp} ref:{[msg.ref_lat, msg.ref_lon, msg.ref_alt]}"
         # )
