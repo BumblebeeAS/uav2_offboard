@@ -5,12 +5,10 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from px4_msgs.msg import (
-    LandingTargetPose,
     OffboardControlMode,
     TakeoffStatus,
     TrajectorySetpoint,
     VehicleCommand,
-    VehicleCommandAck,
     VehicleLocalPosition,
     VehicleStatus,
 )
@@ -85,6 +83,8 @@ class OffboardNode(Node):
             self.local_pos_callback,
             self.qos_profile,
         )
+        self.target_pose = [0.0, 0.0, 0.0]
+        self.current_pose = [0.0, 0.0, 0.0]
         self.offboard_setpoint_counter_ = 0
         self.timer_ = self.create_timer(0.1, self.timer_callback)
 
@@ -95,49 +95,27 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
-        if self.offboard_setpoint_counter_ < 50:
-            setpoint_position = [0.0, 0.0, -10.0]
-            setpoint_velocity = [0.0, 0.0, 0.0]
-            setpoint_acceleration = [0.0, 0.0, 0.0]
-            setpoint_jerk = [0.0, 0.0, 0.0]
-            setpoint_yaw = 0.0
-            setpoint_yaw_speed = 0.0
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
-            self.publish_position_offboard()
+        setpoint_position = [float("NaN"), float("NaN"), float("NaN")]
+        setpoint_acceleration = [float("NaN"), float("NaN"), float("NaN")]
+        setpoint_jerk = [float("NaN"), float("NaN"), float("NaN")]
+        setpoint_yaw = float("NaN")
+
+        if self.offboard_setpoint_counter_ <= 50:
+            x, y, z = self.current_pose
+            self.target_pose = [x, y, z]
 
         if self.offboard_setpoint_counter_ == 50:
             self.set_home_location()
             self.engage_offboard_mode()
-            setpoint_position = [0.0, 0.0, -10.0]
-            setpoint_velocity = [0.0, 0.0, 0.0]
-            setpoint_acceleration = [0.0, 0.0, 0.0]
-            setpoint_jerk = [0.0, 0.0, 0.0]
-            setpoint_yaw = 0.0
-            setpoint_yaw_speed = 0.0
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
             self.arm()
             self.publish_position_offboard()
+            self.target_pose[2] -= 10.0
 
-        if self.offboard_setpoint_counter_ > 50 and self.offboard_setpoint_counter_<= 100:
-            setpoint_position = [0.0, 0.0, -10.0]
-            setpoint_velocity = [0.0, 0.0, 0.0]
-            setpoint_acceleration = [0.0, 0.0, 0.0]
-            setpoint_jerk = [0.0, 0.0, 0.0]
-            setpoint_yaw = 0.0
+        if self.offboard_setpoint_counter_ > 50 and self.offboard_setpoint_counter_<= 300:
+            if self.current_pose[2] > self.target_pose[2] + 0.2:
+                setpoint_velocity = [0.0, 0.0, -10.0]
+            else:
+                setpoint_velocity = [0.0, 0.0, 0.0]
             setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
@@ -147,17 +125,18 @@ class OffboardNode(Node):
                 setpoint_yaw,
                 setpoint_yaw_speed,
             )
-            self.publish_position_offboard()
+
+        if self.offboard_setpoint_counter_ == 300:
+            self.target_pose[0] += 10.0
 
         if (
-            self.offboard_setpoint_counter_ > 100
+            self.offboard_setpoint_counter_ > 300
             and self.offboard_setpoint_counter_ < 600
         ):
-            setpoint_position = [10.0, 10.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [0.0, 0.0, 0.0]
-            setpoint_jerk = [0.0, 0.0, 0.0]
-            setpoint_yaw = 0.0
+            if self.current_pose[0] < self.target_pose[0] + 0.2:
+                setpoint_velocity = [0.5, 0.0, 0.0]
+            else:
+                setpoint_velocity = [0.0, 0.0, 0.0]
             setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
@@ -167,7 +146,30 @@ class OffboardNode(Node):
                 setpoint_yaw,
                 setpoint_yaw_speed,
             )
-            self.publish_velocity_offboard()
+
+        if self.offboard_setpoint_counter_ == 600:
+            self.target_pose[0] += 10.0
+            self.target_pose[1] += 10.0
+
+        if self.offboard_setpoint_counter_ > 600 and self.offboard_setpoint_counter_ < 900:
+            setpoint_velocity = [0.0, 0.0, 0.0]
+            if self.current_pose[0] < self.target_pose[0] + 0.2:
+                setpoint_velocity[0] = 0.5
+            else:
+                setpoint_velocity[0] = 0.0
+            if self.current_pose[1] < self.target_pose[1] + 0.2:
+                setpoint_velocity[1] = 0.5
+            else:
+                setpoint_velocity[1] = 0.0
+            setpoint_yaw_speed = 0.0
+            self.publish_traj_setpoint(
+                setpoint_position,
+                setpoint_velocity,
+                setpoint_acceleration,
+                setpoint_jerk,
+                setpoint_yaw,
+                setpoint_yaw_speed,
+            )
 
         # if (
         #     self.offboard_setpoint_counter_ > 300
@@ -188,15 +190,17 @@ class OffboardNode(Node):
         #         setpoint_yaw_speed,
         #     )
 
-        if self.offboard_setpoint_counter_ >= 600:
+        if self.offboard_setpoint_counter_ == 900:
             self.engage_land_mode()
         self.offboard_setpoint_counter_ += 1
+
+        self.publish_velocity_offboard()
 
     def vehicle_status_callback(self, msg: VehicleStatus):
         self.offboard_status = msg.nav_state == 14
         self.get_logger().info(
             f"Vehicle Status Timestamp: {msg.timestamp} Offboard status(14):{msg.nav_state}"
-        )
+        )      
 
     def takeoff_status_callback(self, msg: TakeoffStatus):
         self.get_logger().info(
@@ -207,6 +211,7 @@ class OffboardNode(Node):
         self.home_lat = msg.ref_lat
         self.home_lon = msg.ref_lon
         self.home_alt = msg._ref_alt
+        self.current_pose = [msg.x, msg.y, msg.z]
         # self.get_logger().info(
         #     f"Local pos Timestamp: {msg.timestamp} ref:{[msg.ref_lat, msg.ref_lon, msg.ref_alt]}"
         # )
