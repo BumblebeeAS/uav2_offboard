@@ -6,12 +6,10 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from px4_msgs.msg import (
-    LandingTargetPose,
     OffboardControlMode,
     TakeoffStatus,
     TrajectorySetpoint,
     VehicleCommand,
-    VehicleCommandAck,
     VehicleLocalPosition,
     VehicleStatus,
 )
@@ -80,9 +78,6 @@ class OffboardNode(Node):
         self.traj_setpoint_pub_ = self.create_publisher(
             TrajectorySetpoint, self.traj_setpoint_topic, self.qos_profile
         )
-        self.mock_detection_pub_ = self.create_publisher(
-            PoseStamped, "/uav2/aruco_pose", 1
-        )
         self.local_pos_sub_ = self.create_subscription(
             VehicleLocalPosition,
             self.local_pos_topic,
@@ -121,27 +116,6 @@ class OffboardNode(Node):
         self.home_lat = msg.ref_lat
         self.home_lon = msg.ref_lon
         self.home_alt = msg._ref_alt
-
-        mmm = PoseStamped()
-        # Fill in the header
-        mmm.header.stamp = self.get_clock().now().to_msg()  # Use current time
-        mmm.header.frame_id = "uav2/camera"
-
-        # Fill in the pose
-        mmm.pose.position.x = 1.0
-        mmm.pose.position.y = 2.0
-        mmm.pose.position.z = 3.0
-
-        mmm.pose.orientation.x = 0.0
-        mmm.pose.orientation.y = 0.0
-        mmm.pose.orientation.z = 0.0
-        mmm.pose.orientation.w = 1.0
-
-        # self.mock_detection_pub_.publish(mmm)
-        # self.get_logger().info(f"Detected at: {mmm}")
-        # self.get_logger().info(
-        #     f"Local pos Timestamp: {msg.timestamp} ref:{[msg.ref_lat, msg.ref_lon, msg.ref_alt]}"
-        # )
 
     def set_home_location(self):
         """
@@ -236,7 +210,7 @@ class OffboardNode(Node):
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_heartbeat_pub_.publish(msg)
-        self.get_logger().info("Publishing offboard heartbeat....")
+        # self.get_logger().info("Publishing offboard heartbeat....")
 
     def engage_offboard_mode(self):
         """Switch mode to offboard mode"""
