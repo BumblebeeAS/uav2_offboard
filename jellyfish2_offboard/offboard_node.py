@@ -26,10 +26,10 @@ class OffboardNode(Node):
         )
         self.declare_parameter("vehicle_status_topic", "")
         self.declare_parameter("offboard_heartbeat_topic", "")
-        self.declare_parameter("takeoff_status_topic", "")
         self.declare_parameter("vehicle_command_topic", "")
         self.declare_parameter("traj_setpoint_topic", "")
         self.declare_parameter("local_pos_topic", "")
+        self.declare_parameter("attitude_topic", "")
         self.vehicle_status_topic = (
             self.get_parameter("vehicle_status_topic")
             .get_parameter_value()
@@ -37,11 +37,6 @@ class OffboardNode(Node):
         )
         self.offboard_heartbeat_topic = (
             self.get_parameter("offboard_heartbeat_topic")
-            .get_parameter_value()
-            .string_value
-        )
-        self.takeoff_status_topic = (
-            self.get_parameter("takeoff_status_topic")
             .get_parameter_value()
             .string_value
         )
@@ -66,12 +61,6 @@ class OffboardNode(Node):
         self.offboard_heartbeat_pub_ = self.create_publisher(
             OffboardControlMode, self.offboard_heartbeat_topic, self.qos_profile
         )
-        self.takeoff_status_sub_ = self.create_subscription(
-            TakeoffStatus,
-            self.takeoff_status_topic,
-            self.takeoff_status_callback,
-            self.qos_profile,
-        )
         self.vehicle_command_pub_ = self.create_publisher(
             VehicleCommand, self.vehicle_command_topic, self.qos_profile
         )
@@ -84,16 +73,29 @@ class OffboardNode(Node):
             self.local_pos_callback,
             self.qos_profile,
         )
+
         self.target_pose = [0.0, 0.0, 0.0]
         self.current_pose = [0.0, 0.0, 0.0]
         self.offboard_setpoint_counter_ = 0
         self.timer_ = self.create_timer(0.1, self.timer_callback)
 
-    def is_within_threshold(self, threshold: list[float]) -> bool:
+    def is_within_threshold_xyz(self, threshold: list[float]) -> bool:
+        self.get_logger().info(
+            f"current_pose: {self.current_pose} going to target_pose: {self.target_pose}"
+        )
         for i in range(3):
-            if self.current_pose[i] + threshold[i] > self.target_pose[i] or self.current_pose[i] - threshold[i] < self.target_pose[i]:
+            if abs(self.current_pose[i] - self.target_pose[i]) > threshold[i]:
                 return False
-        return True 
+        return True
+
+    def is_within_threshold_euclidean(self, threshold: float) -> bool:
+        self.get_logger().info(
+            f"current_pose: {self.current_pose} going to target_pose: {self.target_pose}"
+        )
+        current_pose = np.array(self.current_pose)
+        target_pose = np.array(self.target_pose)
+        distance_from_target = np.linalg.norm(target_pose - current_pose)
+        return abs(distance_from_target) < threshold
 
     def calculate_setpoint_velocity(
         self, start: list[float], target: list[float], target_velocity: float
@@ -106,7 +108,7 @@ class OffboardNode(Node):
         self.get_logger().info(
             f"start_pt:{start_pt}, end_pt:{end_pt}, dir_vec:{dir_vec}, unit_vector{unit_vector}"
         )
-        output_velocity = target_velocity * unit_vector / 0.1
+        output_velocity = target_velocity * unit_vector
         return output_velocity.tolist()
 
     def timer_callback(self):
@@ -125,41 +127,36 @@ class OffboardNode(Node):
             x, y, z = self.current_pose
             self.target_pose = [x, y, z]
 
+            setpoint_velocity = [0.0, 0.0, -1.0]
+            # if not self.is_within_threshold([0.5, 0.5, 0.5]):
+            #     setpoint_velocity = [0.0, 0.0, 0.5]
+            setpoint_yaw_speed = 0.0
+            self.publish_traj_setpoint(
+                setpoint_position,
+                setpoint_velocity,
+                setpoint_acceleration,
+                setpoint_jerk,
+                setpoint_yaw,
+                setpoint_yaw_speed,
+            )
+
         if self.offboard_setpoint_counter_ == 50:
-            self.set_home_location()
             self.engage_offboard_mode()
             self.arm()
-            self.publish_velocity_offboard()
+            self.target_pose[0] += 5.0
+            self.target_pose[1] += 5.0
             self.target_pose[2] -= 10.0
 
-        if self.offboard_setpoint_counter_ > 50 and self.offboard_setpoint_counter_<= 300:
-            setpoint_velocity = [0.0, 0.0, 0.0]
-            if not self.is_within_threshold([0.5, 0.5, 0.5]):
-                # setpoint_velocity = [0.0, 0.0, -10.0]
-                setpoint_velocity = self.calculate_setpoint_velocity(self.current_pose, self.target_pose, 1.0)
-            setpoint_yaw_speed = 0.0
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
-
-        if self.offboard_setpoint_counter_ == 300:
-            self.target_pose[0] += 10.0
-
         if (
-            self.offboard_setpoint_counter_ > 300
-            and self.offboard_setpoint_counter_ < 600
+            self.offboard_setpoint_counter_ > 50
+            and self.offboard_setpoint_counter_ <= 600
         ):
-            setpoint_velocity = [0.0, 0.0, 0.0]
-            if not self.is_within_threshold([0.5, 0.5, 0.5]):
-                setpoint_velocity = self.calculate_setpoint_velocity(
-                    self.current_pose, self.target_pose, 1.0
-                )
-                # setpoint_velocity = [0.5, 0.0, 0.0]
+            setpoint_velocity = self.calculate_setpoint_velocity(
+                start=self.current_pose, target=self.target_pose, target_velocity=1
+            )
+            if self.is_within_threshold_euclidean(0.5):
+                self.get_logger().info("within threshold\n\n\n")
+                setpoint_velocity = [0.0, 0.0, 0.0]
             setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
@@ -170,33 +167,58 @@ class OffboardNode(Node):
                 setpoint_yaw_speed,
             )
 
-        if self.offboard_setpoint_counter_ == 600:
-            self.target_pose[0] += 10.0
-            self.target_pose[1] += 10.0
+        # if self.offboard_setpoint_counter_ == 300:
+        #     self.target_pose[0] += 10.0
 
-        if self.offboard_setpoint_counter_ > 600 and self.offboard_setpoint_counter_ < 900:
-            setpoint_velocity = [0.0, 0.0, 0.0]
-            if not self.is_within_threshold([0.5, 0.5, 0.5]):
-                setpoint_velocity = self.calculate_setpoint_velocity(
-                    self.current_pose, self.target_pose, 1.0
-                )
-            # if self.current_pose[0] < self.target_pose[0] + 0.2:
-            #     setpoint_velocity[0] = 0.5
-            # else:
-            #     setpoint_velocity[0] = 0.0
-            # if self.current_pose[1] < self.target_pose[1] + 0.2:
-            #     setpoint_velocity[1] = 0.5
-            # else:
-            #     setpoint_velocity[1] = 0.0
-            setpoint_yaw_speed = 0.0
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
+        # if (
+        #     self.offboard_setpoint_counter_ > 300
+        #     and self.offboard_setpoint_counter_ < 600
+        # ):
+        #     setpoint_velocity = [0.0, 0.0, 0.0]
+        #     if not self.is_within_threshold([0.5, 0.5, 0.5]):
+        #         setpoint_velocity = self.calculate_setpoint_velocity(
+        #             self.current_pose, self.target_pose, 1.0
+        #         )
+        #     setpoint_yaw_speed = 0.0
+        #     self.publish_traj_setpoint(
+        #         setpoint_position,
+        #         setpoint_velocity,
+        #         setpoint_acceleration,
+        #         setpoint_jerk,
+        #         setpoint_yaw,
+        #         setpoint_yaw_speed,
+        #     )
+
+        # if self.offboard_setpoint_counter_ == 600:
+        #     self.target_pose[0] += 10.0
+        #     self.target_pose[1] += 10.0
+
+        # if (
+        #     self.offboard_setpoint_counter_ > 600
+        #     and self.offboard_setpoint_counter_ < 900
+        # ):
+        #     setpoint_velocity = [0.0, 0.0, 0.0]
+        #     if not self.is_within_threshold([0.5, 0.5, 0.5]):
+        #         setpoint_velocity = self.calculate_setpoint_velocity(
+        #             self.current_pose, self.target_pose, 1.0
+        #         )
+        # if self.current_pose[0] < self.target_pose[0] + 0.2:
+        #     setpoint_velocity[0] = 0.5
+        # else:
+        #     setpoint_velocity[0] = 0.0
+        # if self.current_pose[1] < self.target_pose[1] + 0.2:
+        #     setpoint_velocity[1] = 0.5
+        # else:
+        #     setpoint_velocity[1] = 0.0
+        # setpoint_yaw_speed = 0.0
+        # self.publish_traj_setpoint(
+        #     setpoint_position,
+        #     setpoint_velocity,
+        #     setpoint_acceleration,
+        #     setpoint_jerk,
+        #     setpoint_yaw,
+        #     setpoint_yaw_speed,
+        # )
 
         # if (
         #     self.offboard_setpoint_counter_ > 300
@@ -217,21 +239,15 @@ class OffboardNode(Node):
         #         setpoint_yaw_speed,
         #     )
 
-        if self.offboard_setpoint_counter_ == 900:
+        if self.offboard_setpoint_counter_ == 600:
             self.engage_land_mode()
         self.offboard_setpoint_counter_ += 1
-
         self.publish_velocity_offboard()
 
     def vehicle_status_callback(self, msg: VehicleStatus):
         self.offboard_status = msg.nav_state == 14
         self.get_logger().info(
             f"Vehicle Status Timestamp: {msg.timestamp} Offboard status(14):{msg.nav_state}"
-        )      
-
-    def takeoff_status_callback(self, msg: TakeoffStatus):
-        self.get_logger().info(
-            f"TAKEOFF Timestamp: {msg.timestamp} Status:{msg.takeoff_state}"
         )
 
     def local_pos_callback(self, msg: VehicleLocalPosition):
@@ -242,16 +258,6 @@ class OffboardNode(Node):
         # self.get_logger().info(
         #     f"Local pos Timestamp: {msg.timestamp} ref:{[msg.ref_lat, msg.ref_lon, msg.ref_alt]}"
         # )
-
-    def set_home_location(self):
-        """
-        set home position to current location
-        Changes the home location either to the current location or a specified location.
-        |Use current (1=use current location, 0=use specified location)| Empty| Empty| Empty| Latitude| Longitude| Altitude|
-        """
-        # Debug need to check whether home location works
-        self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_HOME, param1=1.0)
-        self.get_logger().info("Set home location...")
 
     # TODO Implement waypointing in the future
     # TODO Keep as an arbitary value to test states
@@ -317,7 +323,7 @@ class OffboardNode(Node):
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0
         )
-        self.get_logger().info("Arm command sent....")
+        self.get_logger().info("Arm command sent....\n")
 
     def disarm(self):
         """Disarm drone. Param1=0.0 for disarm."""
@@ -336,7 +342,7 @@ class OffboardNode(Node):
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_heartbeat_pub_.publish(msg)
-        self.get_logger().info("Publishing offboard heartbeat....")
+        self.get_logger().info("Publishing position heartbeat....")
 
     def publish_velocity_offboard(self):
         """Publish offboard heartbeat."""
@@ -348,7 +354,7 @@ class OffboardNode(Node):
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_heartbeat_pub_.publish(msg)
-        self.get_logger().info("Publishing offboard heartbeat....")
+        self.get_logger().info("Publishing velocity heartbeat....")
 
     def engage_offboard_mode(self):
         """Switch mode to offboard mode"""
