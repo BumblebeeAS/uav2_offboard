@@ -105,10 +105,11 @@ class OffboardNode(Node):
         dir_vec = end_pt - start_pt
         path_distance = np.linalg.norm(dir_vec)
         unit_vector = dir_vec / path_distance
+        scaling_factor = 0.1 * path_distance 
         self.get_logger().info(
             f"start_pt:{start_pt}, end_pt:{end_pt}, dir_vec:{dir_vec}, unit_vector{unit_vector}"
         )
-        output_velocity = target_velocity * unit_vector
+        output_velocity = scaling_factor * target_velocity * unit_vector
         return output_velocity.tolist()
 
     def timer_callback(self):
@@ -152,9 +153,9 @@ class OffboardNode(Node):
             and self.offboard_setpoint_counter_ <= 600
         ):
             setpoint_velocity = self.calculate_setpoint_velocity(
-                start=self.current_pose, target=self.target_pose, target_velocity=1
+                start=self.current_pose, target=self.target_pose, target_velocity=2
             )
-            if self.is_within_threshold_euclidean(0.5):
+            if self.is_within_threshold_euclidean(0.2):
                 self.get_logger().info("within threshold\n\n\n")
                 setpoint_velocity = [0.0, 0.0, 0.0]
             setpoint_yaw_speed = 0.0
