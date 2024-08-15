@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
+import math
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -88,6 +89,26 @@ class OffboardNode(Node):
         self.offboard_setpoint_counter_ = 0
         self.timer_ = self.create_timer(0.1, self.timer_callback)
 
+    def is_within_threshold(self, threshold: list[float]) -> bool:
+        for i in range(3):
+            if self.current_pose[i] + threshold[i] > self.target_pose[i] or self.current_pose[i] - threshold[i] < self.target_pose[i]:
+                return False
+        return True 
+
+    def calculate_setpoint_velocity(
+        self, start: list[float], target: list[float], target_velocity: float
+    ) -> list[float]:
+        start_pt = np.array(start)
+        end_pt = np.array(target)
+        dir_vec = end_pt - start_pt
+        path_distance = np.linalg.norm(dir_vec)
+        unit_vector = dir_vec / path_distance
+        self.get_logger().info(
+            f"start_pt:{start_pt}, end_pt:{end_pt}, dir_vec:{dir_vec}, unit_vector{unit_vector}"
+        )
+        output_velocity = target_velocity * unit_vector / 0.1
+        return output_velocity.tolist()
+
     def timer_callback(self):
         """
         Continuously publish heartbeat and traj setpoint.
@@ -108,14 +129,14 @@ class OffboardNode(Node):
             self.set_home_location()
             self.engage_offboard_mode()
             self.arm()
-            self.publish_position_offboard()
+            self.publish_velocity_offboard()
             self.target_pose[2] -= 10.0
 
         if self.offboard_setpoint_counter_ > 50 and self.offboard_setpoint_counter_<= 300:
-            if self.current_pose[2] > self.target_pose[2] + 0.2:
-                setpoint_velocity = [0.0, 0.0, -10.0]
-            else:
-                setpoint_velocity = [0.0, 0.0, 0.0]
+            setpoint_velocity = [0.0, 0.0, 0.0]
+            if not self.is_within_threshold([0.5, 0.5, 0.5]):
+                # setpoint_velocity = [0.0, 0.0, -10.0]
+                setpoint_velocity = self.calculate_setpoint_velocity(self.current_pose, self.target_pose, 1.0)
             setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
@@ -133,10 +154,12 @@ class OffboardNode(Node):
             self.offboard_setpoint_counter_ > 300
             and self.offboard_setpoint_counter_ < 600
         ):
-            if self.current_pose[0] < self.target_pose[0] + 0.2:
-                setpoint_velocity = [0.5, 0.0, 0.0]
-            else:
-                setpoint_velocity = [0.0, 0.0, 0.0]
+            setpoint_velocity = [0.0, 0.0, 0.0]
+            if not self.is_within_threshold([0.5, 0.5, 0.5]):
+                setpoint_velocity = self.calculate_setpoint_velocity(
+                    self.current_pose, self.target_pose, 1.0
+                )
+                # setpoint_velocity = [0.5, 0.0, 0.0]
             setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
@@ -153,14 +176,18 @@ class OffboardNode(Node):
 
         if self.offboard_setpoint_counter_ > 600 and self.offboard_setpoint_counter_ < 900:
             setpoint_velocity = [0.0, 0.0, 0.0]
-            if self.current_pose[0] < self.target_pose[0] + 0.2:
-                setpoint_velocity[0] = 0.5
-            else:
-                setpoint_velocity[0] = 0.0
-            if self.current_pose[1] < self.target_pose[1] + 0.2:
-                setpoint_velocity[1] = 0.5
-            else:
-                setpoint_velocity[1] = 0.0
+            if not self.is_within_threshold([0.5, 0.5, 0.5]):
+                setpoint_velocity = self.calculate_setpoint_velocity(
+                    self.current_pose, self.target_pose, 1.0
+                )
+            # if self.current_pose[0] < self.target_pose[0] + 0.2:
+            #     setpoint_velocity[0] = 0.5
+            # else:
+            #     setpoint_velocity[0] = 0.0
+            # if self.current_pose[1] < self.target_pose[1] + 0.2:
+            #     setpoint_velocity[1] = 0.5
+            # else:
+            #     setpoint_velocity[1] = 0.0
             setpoint_yaw_speed = 0.0
             self.publish_traj_setpoint(
                 setpoint_position,
