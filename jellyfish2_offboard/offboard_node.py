@@ -203,14 +203,14 @@ class OffboardNode(Node):
     def publish_offboard_heartbeat(self):
         """Publish offboard heartbeat."""
         msg = OffboardControlMode()
-        msg.position = True
-        msg.velocity = False
+        msg.position = False
+        msg.velocity = True
         msg.acceleration = False
         msg.attitude = False
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_heartbeat_pub_.publish(msg)
-        # self.get_logger().info("Publishing offboard heartbeat....")
+        self.get_logger().info(f"Publishing heartbeat mode: {'Velocity' if msg.velocity else 'Position'}")
 
     def engage_offboard_mode(self):
         """Switch mode to offboard mode"""
