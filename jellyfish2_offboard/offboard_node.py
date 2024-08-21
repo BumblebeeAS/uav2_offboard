@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 import numpy as np
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-
 from px4_msgs.msg import (
-    LandingTargetPose,
+    GotoSetpoint,
     OffboardControlMode,
-    TakeoffStatus,
     TrajectorySetpoint,
     VehicleCommand,
-    VehicleCommandAck,
     VehicleLocalPosition,
     VehicleStatus,
 )
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 
 class OffboardNode(Node):
@@ -27,10 +24,10 @@ class OffboardNode(Node):
         )
         self.declare_parameter("vehicle_status_topic", "")
         self.declare_parameter("offboard_heartbeat_topic", "")
-        self.declare_parameter("takeoff_status_topic", "")
         self.declare_parameter("vehicle_command_topic", "")
         self.declare_parameter("traj_setpoint_topic", "")
         self.declare_parameter("local_pos_topic", "")
+        self.declare_parameter("go_to_setpoint_topic", "")
         self.vehicle_status_topic = (
             self.get_parameter("vehicle_status_topic")
             .get_parameter_value()
@@ -38,11 +35,6 @@ class OffboardNode(Node):
         )
         self.offboard_heartbeat_topic = (
             self.get_parameter("offboard_heartbeat_topic")
-            .get_parameter_value()
-            .string_value
-        )
-        self.takeoff_status_topic = (
-            self.get_parameter("takeoff_status_topic")
             .get_parameter_value()
             .string_value
         )
@@ -57,7 +49,11 @@ class OffboardNode(Node):
         self.local_pos_topic = (
             self.get_parameter("local_pos_topic").get_parameter_value().string_value
         )
-
+        self.go_to_topic = (
+            self.get_parameter("go_to_setpoint_topic")
+            .get_parameter_value()
+            .string_value
+        )
         self.vehicle_status_sub_ = self.create_subscription(
             VehicleStatus,
             self.vehicle_status_topic,
@@ -66,12 +62,6 @@ class OffboardNode(Node):
         )
         self.offboard_heartbeat_pub_ = self.create_publisher(
             OffboardControlMode, self.offboard_heartbeat_topic, self.qos_profile
-        )
-        self.takeoff_status_sub_ = self.create_subscription(
-            TakeoffStatus,
-            self.takeoff_status_topic,
-            self.takeoff_status_callback,
-            self.qos_profile,
         )
         self.vehicle_command_pub_ = self.create_publisher(
             VehicleCommand, self.vehicle_command_topic, self.qos_profile
@@ -86,10 +76,6 @@ class OffboardNode(Node):
             self.qos_profile,
         )
         self.offboard_setpoint_counter_ = 0
-        self.home_lat = 0.0
-        self.home_lon = 0.0
-        self.home_alt = 0.0
-        self.set_home_location()
         self.timer_ = self.create_timer(0.1, self.timer_callback)
 
     def timer_callback(self):
@@ -99,54 +85,24 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
-        if self.offboard_setpoint_counter_ < 300:
-            setpoint_position = [0.0, 0.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = 3.14159
-            setpoint_yaw_speed = 0.1
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
-
         if self.offboard_setpoint_counter_ == 50:
-            self.set_home_location()
-            self.engage_offboard_mode()
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
+            # self.engage_offboard_mode()
             self.arm()
+
+        if self.offboard_setpoint_counter_ < 300:
+            position = [0.0, 0.0, -10.0]
+            self.publish_go_to_setpoint(
+                position=position, vert_speed=1.0, hori_speed=4.0
+            )
 
         if (
             self.offboard_setpoint_counter_ > 300
             and self.offboard_setpoint_counter_ < 600
         ):
-            setpoint_position = [5.0, 5.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = -1.57
-            setpoint_yaw_speed = 0.1
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
+            position = [5.0, 5.0, -10.0]
+            self.publish_go_to_setpoint(
+                position=position, vert_speed=1.0, hori_speed=4.0
             )
-
 
         if self.offboard_setpoint_counter_ >= 600:
             self.engage_land_mode()
@@ -154,15 +110,22 @@ class OffboardNode(Node):
         self.publish_offboard_heartbeat()
         self.offboard_setpoint_counter_ += 1
 
+    def publish_go_to_setpoint(self, position, vert_speed: float, hori_speed: float):
+        msg = GotoSetpoint()
+        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        msg.position = position
+        msg.flag_set_max_vertical_speed = True
+        msg.flag_set_max_horizontal_speed = True
+        msg.max_vertical_speed = vert_speed
+        msg.max_horizontal_speed = hori_speed
+        self.get_logger().info(
+            f"Publishing setpoint {msg.position} with max vert: {msg.max_vertical_speed} max hori: {msg.max_horizontal_speed}"
+        )
+
     def vehicle_status_callback(self, msg: VehicleStatus):
         self.offboard_status = msg.nav_state == 14
         self.get_logger().info(
             f"Vehicle Status Timestamp: {msg.timestamp} Offboard status(14):{msg.nav_state}"
-        )
-
-    def takeoff_status_callback(self, msg: TakeoffStatus):
-        self.get_logger().info(
-            f"TAKEOFF Timestamp: {msg.timestamp} Status:{msg.takeoff_state}"
         )
 
     def local_pos_callback(self, msg: VehicleLocalPosition):
@@ -172,56 +135,6 @@ class OffboardNode(Node):
         # self.get_logger().info(
         #     f"Local pos Timestamp: {msg.timestamp} ref:{[msg.ref_lat, msg.ref_lon, msg.ref_alt]}"
         # )
-
-    def set_home_location(self):
-        """
-        set home position to current location
-        Changes the home location either to the current location or a specified location.
-        |Use current (1=use current location, 0=use specified location)| Empty| Empty| Empty| Latitude| Longitude| Altitude|
-        """
-        # Debug need to check whether home location works
-        self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_HOME, param1=1.0)
-        self.get_logger().info("Set home location...")
-
-    # TODO Implement waypointing in the future
-    # TODO Keep as an arbitary value to test states
-    def publish_traj_setpoint(
-        self, position, velocity, acceleration, jerk, yaw, yaw_speed
-    ):
-        """# Trajectory setpoint in NED frame
-        # Input to PID position controller.
-        # Needs to be kinematically consistent and feasible for smooth flight.
-        # setting a value to NaN means the state should not be controlled
-
-        uint64 timestamp # time since system start (microseconds)
-
-        # NED local world frame
-        float32[3] position # in meters
-        float32[3] velocity # in meters/second
-        float32[3] acceleration # in meters/second^2
-        float32[3] jerk # in meters/second^3 (for logging only)
-
-        float32 yaw # euler angle of desired attitude in radians -PI..+PI
-        float32 yaw_speed # angular velocity around NED frame z-axis in radians/second
-        """
-        msg = TrajectorySetpoint()
-        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        msg.position = position
-        msg.velocity = velocity
-        msg.acceleration = acceleration
-        msg.jerk = jerk
-        msg.yaw = yaw
-        msg.yawspeed = yaw_speed
-        self.traj_setpoint_pub_.publish(msg)
-        self.get_logger().info(
-            f"Traj setpoint sent position"
-            f"{msg.position}\n"
-            f"velocity:{msg.velocity}\n"
-            f"acceleration:{msg.acceleration}\n"
-            f"jerk:{msg.jerk}\n"
-            f"yaw:{msg.yaw}\n"
-            f"msg.yaw_speed{msg.yawspeed}\n"
-        )
 
     def publish_vehicle_command(self, command, **params) -> None:
         """Publish a vehicle command."""
