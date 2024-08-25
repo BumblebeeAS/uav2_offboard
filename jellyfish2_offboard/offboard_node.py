@@ -2,12 +2,12 @@
 import numpy as np
 import math
 import rclpy
+from jellyfish2_offboard.motion_generator import MotionGenerator
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from px4_msgs.msg import (
     OffboardControlMode,
-    TakeoffStatus,
     TrajectorySetpoint,
     VehicleCommand,
     VehicleLocalPosition,
@@ -73,11 +73,12 @@ class OffboardNode(Node):
             self.local_pos_callback,
             self.qos_profile,
         )
-
+        self.motion_gen = MotionGenerator(5.0, 1.0)
         self.target_pose = [0.0, 0.0, 0.0]
         self.current_pose = [0.0, 0.0, 0.0]
         self.offboard_setpoint_counter_ = 0
         self.timer_ = self.create_timer(0.1, self.timer_callback)
+        self.prev_time = 0.0
 
     def is_within_threshold_xyz(self, threshold: list[float]) -> bool:
         self.get_logger().info(
@@ -124,38 +125,36 @@ class OffboardNode(Node):
         setpoint_jerk = [float("NaN"), float("NaN"), float("NaN")]
         setpoint_yaw = float("NaN")
 
-        if self.offboard_setpoint_counter_ <= 50:
+        if self.offboard_setpoint_counter_ < 50:
             x, y, z = self.current_pose
             self.target_pose = [x, y, z]
-
-            setpoint_velocity = [0.0, 0.0, -1.0]
-            # if not self.is_within_threshold([0.5, 0.5, 0.5]):
-            #     setpoint_velocity = [0.0, 0.0, 0.5]
-            setpoint_yaw_speed = 0.0
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
 
         if self.offboard_setpoint_counter_ == 50:
             self.engage_offboard_mode()
             self.arm()
-            self.target_pose[0] += 5.0
-            self.target_pose[1] += 5.0
             self.target_pose[2] -= 10.0
+            self.motion_gen.set_target(self.target_pose)
+            self.prev = self.get_clock().now().nanoseconds / 1e9
 
         if (
             self.offboard_setpoint_counter_ > 50
             and self.offboard_setpoint_counter_ <= 600
         ):
-            setpoint_velocity = self.calculate_setpoint_velocity(
-                start=self.current_pose, target=self.target_pose, target_velocity=2
-            )
-            if self.is_within_threshold_euclidean(0.2):
+            '''
+            1. find out the delta t from the last update
+            2. update the prev time, curr pos and curr vel
+            3. calc the next vel for this point in time currently need scale cuz px4
+            '''
+            time_now = self.get_clock().now().nanoseconds / 1e9
+            dt = time_now - self.prev
+            self.prev = time_now
+            self.motion_gen.update_current_pose(self.current_pose.copy())
+            self.motion_gen.update_current_vel(self.current_vel.copy())
+            setpoint_velocity = self.motion_gen.calc_next_vel(dt * 1.5).tolist()
+            # setpoint_velocity = self.calculate_setpoint_velocity(
+            #     start=self.current_pose, target=self.target_pose, target_velocity=2
+            # )
+            if self.is_within_threshold_euclidean(0.01):
                 self.get_logger().info("within threshold\n\n\n")
                 setpoint_velocity = [0.0, 0.0, 0.0]
             setpoint_yaw_speed = 0.0
@@ -168,79 +167,41 @@ class OffboardNode(Node):
                 setpoint_yaw_speed,
             )
 
-        # if self.offboard_setpoint_counter_ == 300:
-        #     self.target_pose[0] += 10.0
+        if (self.offboard_setpoint_counter_ == 600):
+            self.target_pose[1] += 15.0
+            self.motion_gen.set_target(self.target_pose)
+            self.prev = self.get_clock().now().nanoseconds / 1e9
+        
+        if (
+            self.offboard_setpoint_counter_ > 600
+            and self.offboard_setpoint_counter_ <= 1000
+        ):
+            '''
+            1. find out the delta t from the last update
+            2. update the prev time, curr pos and curr vel
+            3. calc the next vel for this point in time currently need scale cuz px4
+            '''
+            time_now = self.get_clock().now().nanoseconds / 1e9
+            dt = time_now - self.prev
+            self.prev = time_now
+            self.motion_gen.update_current_pose(self.current_pose.copy())
+            self.motion_gen.update_current_vel(self.current_vel.copy())
+            setpoint_velocity = self.motion_gen.calc_next_vel(dt * 1.5).tolist()
+            
+            if self.is_within_threshold_euclidean(0.01):
+                self.get_logger().info("within threshold\n\n\n")
+                setpoint_velocity = [0.0, 0.0, 0.0]
+            setpoint_yaw_speed = 0.0
+            self.publish_traj_setpoint(
+                setpoint_position,
+                setpoint_velocity,
+                setpoint_acceleration,
+                setpoint_jerk,
+                setpoint_yaw,
+                setpoint_yaw_speed,
+            ) 
 
-        # if (
-        #     self.offboard_setpoint_counter_ > 300
-        #     and self.offboard_setpoint_counter_ < 600
-        # ):
-        #     setpoint_velocity = [0.0, 0.0, 0.0]
-        #     if not self.is_within_threshold([0.5, 0.5, 0.5]):
-        #         setpoint_velocity = self.calculate_setpoint_velocity(
-        #             self.current_pose, self.target_pose, 1.0
-        #         )
-        #     setpoint_yaw_speed = 0.0
-        #     self.publish_traj_setpoint(
-        #         setpoint_position,
-        #         setpoint_velocity,
-        #         setpoint_acceleration,
-        #         setpoint_jerk,
-        #         setpoint_yaw,
-        #         setpoint_yaw_speed,
-        #     )
-
-        # if self.offboard_setpoint_counter_ == 600:
-        #     self.target_pose[0] += 10.0
-        #     self.target_pose[1] += 10.0
-
-        # if (
-        #     self.offboard_setpoint_counter_ > 600
-        #     and self.offboard_setpoint_counter_ < 900
-        # ):
-        #     setpoint_velocity = [0.0, 0.0, 0.0]
-        #     if not self.is_within_threshold([0.5, 0.5, 0.5]):
-        #         setpoint_velocity = self.calculate_setpoint_velocity(
-        #             self.current_pose, self.target_pose, 1.0
-        #         )
-        # if self.current_pose[0] < self.target_pose[0] + 0.2:
-        #     setpoint_velocity[0] = 0.5
-        # else:
-        #     setpoint_velocity[0] = 0.0
-        # if self.current_pose[1] < self.target_pose[1] + 0.2:
-        #     setpoint_velocity[1] = 0.5
-        # else:
-        #     setpoint_velocity[1] = 0.0
-        # setpoint_yaw_speed = 0.0
-        # self.publish_traj_setpoint(
-        #     setpoint_position,
-        #     setpoint_velocity,
-        #     setpoint_acceleration,
-        #     setpoint_jerk,
-        #     setpoint_yaw,
-        #     setpoint_yaw_speed,
-        # )
-
-        # if (
-        #     self.offboard_setpoint_counter_ > 300
-        #     and self.offboard_setpoint_counter_ < 600
-        # ):
-        #     setpoint_position = [5.0, 5.0, -10.0]
-        #     setpoint_velocity = [0.0, 0.0, 0.0]
-        #     setpoint_acceleration = [0.0, 0.0, 0.0]
-        #     setpoint_jerk = [0.0, 0.0, 0.0]
-        #     setpoint_yaw = -1.57
-        #     setpoint_yaw_speed = 0.1
-        #     self.publish_traj_setpoint(
-        #         setpoint_position,
-        #         setpoint_velocity,
-        #         setpoint_acceleration,
-        #         setpoint_jerk,
-        #         setpoint_yaw,
-        #         setpoint_yaw_speed,
-        #     )
-
-        if self.offboard_setpoint_counter_ == 600:
+        if self.offboard_setpoint_counter_ == 1000:
             self.engage_land_mode()
         self.offboard_setpoint_counter_ += 1
         self.publish_velocity_offboard()
@@ -256,12 +217,10 @@ class OffboardNode(Node):
         self.home_lon = msg.ref_lon
         self.home_alt = msg._ref_alt
         self.current_pose = [msg.x, msg.y, msg.z]
-        # self.get_logger().info(
-        #     f"Local pos Timestamp: {msg.timestamp} ref:{[msg.ref_lat, msg.ref_lon, msg.ref_alt]}"
-        # )
+        self.current_vel = [msg.vx, msg.vy, msg.vz]
+        # self.motion_gen.update_current_pose([float(msg.x), float(msg.y), float(msg.z)])
+        # self.motion_gen.update_current_vel([float(msg.vx), float(msg.vy), float(msg.vz)])
 
-    # TODO Implement waypointing in the future
-    # TODO Keep as an arbitary value to test states
     def publish_traj_setpoint(
         self, position, velocity, acceleration, jerk, yaw, yaw_speed
     ):
@@ -290,15 +249,15 @@ class OffboardNode(Node):
         msg.yaw = yaw
         msg.yawspeed = yaw_speed
         self.traj_setpoint_pub_.publish(msg)
-        self.get_logger().info(
-            f"Traj setpoint sent position \n"
-            f" {msg.position}\n"
-            f"velocity: {msg.velocity}\n"
-            f"acceleration: {msg.acceleration}\n"
-            f"jerk: {msg.jerk}\n"
-            f"yaw: {msg.yaw}\n"
-            f"yaw_speed {msg.yawspeed}\n"
-        )
+        # self.get_logger().info(
+        #     f"Traj setpoint sent position \n"
+        #     f" {msg.position}\n"
+        #     f"velocity: {msg.velocity}\n"
+        #     f"acceleration: {msg.acceleration}\n"
+        #     f"jerk: {msg.jerk}\n"
+        #     f"yaw: {msg.yaw}\n"
+        #     f"yaw_speed {msg.yawspeed}\n"
+        # )
 
     def publish_vehicle_command(self, command, **params) -> None:
         """Publish a vehicle command."""
