@@ -73,7 +73,7 @@ class OffboardNode(Node):
             self.local_pos_callback,
             self.qos_profile,
         )
-        self.motion_gen = MotionGenerator(5.0, 1.0)
+        self.motion_gen = MotionGenerator(5.0, 2.0)
         self.target_pose = [0.0, 0.0, 0.0]
         self.current_pose = [0.0, 0.0, 0.0]
         self.offboard_setpoint_counter_ = 0
@@ -132,13 +132,13 @@ class OffboardNode(Node):
         if self.offboard_setpoint_counter_ == 50:
             self.engage_offboard_mode()
             self.arm()
-            self.target_pose[2] -= 10.0
+            self.target_pose[2] -= 5.0
             self.motion_gen.set_target(self.target_pose)
             self.prev = self.get_clock().now().nanoseconds / 1e9
 
         if (
             self.offboard_setpoint_counter_ > 50
-            and self.offboard_setpoint_counter_ <= 600
+            and self.offboard_setpoint_counter_ < 200
         ):
             '''
             1. find out the delta t from the last update
@@ -150,7 +150,7 @@ class OffboardNode(Node):
             self.prev = time_now
             self.motion_gen.update_current_pose(self.current_pose.copy())
             self.motion_gen.update_current_vel(self.current_vel.copy())
-            setpoint_velocity = self.motion_gen.calc_next_vel(dt * 1.5).tolist()
+            setpoint_velocity = self.motion_gen.calc_next_vel(dt).tolist()
             # setpoint_velocity = self.calculate_setpoint_velocity(
             #     start=self.current_pose, target=self.target_pose, target_velocity=2
             # )
@@ -167,14 +167,14 @@ class OffboardNode(Node):
                 setpoint_yaw_speed,
             )
 
-        if (self.offboard_setpoint_counter_ == 600):
-            self.target_pose[1] += 15.0
+        if (self.offboard_setpoint_counter_ == 200):
+            self.target_pose[1] += 30.0
             self.motion_gen.set_target(self.target_pose)
             self.prev = self.get_clock().now().nanoseconds / 1e9
         
         if (
-            self.offboard_setpoint_counter_ > 600
-            and self.offboard_setpoint_counter_ <= 1000
+            self.offboard_setpoint_counter_ > 200
+            and self.offboard_setpoint_counter_ < 600
         ):
             '''
             1. find out the delta t from the last update
@@ -186,7 +186,7 @@ class OffboardNode(Node):
             self.prev = time_now
             self.motion_gen.update_current_pose(self.current_pose.copy())
             self.motion_gen.update_current_vel(self.current_vel.copy())
-            setpoint_velocity = self.motion_gen.calc_next_vel(dt * 1.5).tolist()
+            setpoint_velocity = self.motion_gen.calc_next_vel(dt).tolist()
             
             if self.is_within_threshold_euclidean(0.01):
                 self.get_logger().info("within threshold\n\n\n")
@@ -201,7 +201,7 @@ class OffboardNode(Node):
                 setpoint_yaw_speed,
             ) 
 
-        if self.offboard_setpoint_counter_ == 1000:
+        if self.offboard_setpoint_counter_ == 600:
             self.engage_land_mode()
         self.offboard_setpoint_counter_ += 1
         self.publish_velocity_offboard()

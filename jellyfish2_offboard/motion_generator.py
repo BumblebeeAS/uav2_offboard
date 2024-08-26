@@ -7,6 +7,7 @@ class MotionGenerator:
         self.current_pose = np.array([0.0, 0.0, 0.0])
         self.target_pose = np.array([0.0, 0.0, 0.0])
         self.current_vel = np.array([0.0, 0.0, 0.0])
+        self.current_vel_mag = 0.0
         self.braking = False
 
     def set_target(self, target: list[float]):
@@ -25,16 +26,18 @@ class MotionGenerator:
         return dir_vec / norm
 
     def calc_braking_dist(self):
-        current_vel_magnitude = np.linalg.norm(self.current_vel)
-        return current_vel_magnitude * current_vel_magnitude / (2 * self.accel)
+        # calc the dist based on max accel allowed and current vel mag
+        return (self.current_vel_mag * self.current_vel_mag) / (2 * self.accel)
+
 
     def calc_next_vel(self, delta_time):
         braking_dist = self.calc_braking_dist()
         dist_to_target = self.calc_dist_to_target()
 
-        if self.braking or dist_to_target <= braking_dist:
+        if self.braking or dist_to_target <= braking_dist + 1.5:
+            braking_accel = (self.current_vel_mag * self.current_vel_mag) / (2 * dist_to_target)
             self.braking = True
-            next_vel_mag = max(np.linalg.norm(self.current_vel) - self.accel * delta_time, 0.0)
+            next_vel_mag = max(np.linalg.norm(self.current_vel) - braking_accel * delta_time, 0.0)
         else:
             next_vel_mag = min(np.linalg.norm(self.current_vel) + self.accel * delta_time, self.max_vel)
         
@@ -42,6 +45,7 @@ class MotionGenerator:
 
     def update_current_vel(self, current_vel: list[float]):
         self.current_vel = np.array(current_vel)
+        self.current_vel_mag = np.linalg.norm(self.current_vel)
 
     def update_current_pose(self, current_pose: list[float]):
         self.current_pose = np.array(current_pose)
