@@ -203,8 +203,8 @@ class OffboardNode(Node):
     def publish_offboard_heartbeat(self):
         """Publish offboard heartbeat."""
         msg = OffboardControlMode()
-        msg.position = False
-        msg.velocity = True
+        msg.position = True
+        msg.velocity = False
         msg.acceleration = False
         msg.attitude = False
         msg.body_rate = False
