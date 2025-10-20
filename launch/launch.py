@@ -1,15 +1,12 @@
-from pathlib import Path
-from typing import List
-
+from launch import LaunchDescription
 from launch_ros.actions import Node
 
-from launch import LaunchDescription
 
 def generate_launch_description():
     ld = LaunchDescription()
 
     node = Node(
-        package="jellyfish2_offboard",
+        package="uav2_offboard",
         executable="offboard_node",
         name="offboard_node",
         # DEBUG topic names are not set yet, need to look at terminal

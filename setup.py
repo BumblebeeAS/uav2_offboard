@@ -1,7 +1,9 @@
-from setuptools import find_packages, setup
-import os 
+import os
 from glob import glob
-package_name = 'jellyfish2_offboard'
+
+from setuptools import find_packages, setup
+
+package_name = "uav2_offboard"
 
 setup(
     name=package_name,
@@ -23,6 +25,6 @@ setup(
     license="TODO: License declaration",
     tests_require=["pytest"],
     entry_points={
-        "console_scripts": ["offboard_node = jellyfish2_offboard.offboard_node:main"],
+        "console_scripts": ["offboard_node = uav2_offboard.offboard_node:main"],
     },
 )

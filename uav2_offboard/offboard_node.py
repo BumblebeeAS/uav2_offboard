@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-import numpy as np
 import rclpy
-from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
@@ -210,7 +208,9 @@ class OffboardNode(Node):
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_heartbeat_pub_.publish(msg)
-        self.get_logger().info(f"Publishing heartbeat mode: {'Velocity' if msg.velocity else 'Position'}")
+        self.get_logger().info(
+            f"Publishing heartbeat mode: {'Velocity' if msg.velocity else 'Position'}"
+        )
 
     def engage_offboard_mode(self):
         """Switch mode to offboard mode"""
