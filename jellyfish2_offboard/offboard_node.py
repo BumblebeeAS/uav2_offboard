@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 import numpy as np
 import rclpy
+from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from px4_msgs.msg import (
-    LandingTargetPose,
     OffboardControlMode,
     TakeoffStatus,
     TrajectorySetpoint,
     VehicleCommand,
-    VehicleCommandAck,
     VehicleLocalPosition,
     VehicleStatus,
 )
@@ -99,58 +98,6 @@ class OffboardNode(Node):
         OffboardControlMode messages before it will arm in offboard mode,
         or before it will switch to offboard mode when flying
         """
-        if self.offboard_setpoint_counter_ < 300:
-            setpoint_position = [0.0, 0.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = 3.14159
-            setpoint_yaw_speed = 0.1
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
-
-        if self.offboard_setpoint_counter_ == 50:
-            self.set_home_location()
-            self.engage_offboard_mode()
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
-            self.arm()
-
-        if (
-            self.offboard_setpoint_counter_ > 300
-            and self.offboard_setpoint_counter_ < 600
-        ):
-            setpoint_position = [5.0, 5.0, -10.0]
-            setpoint_velocity = [2.0, 2.0, 2.0]
-            setpoint_acceleration = [2.0, 2.0, 2.0]
-            setpoint_jerk = [2.0, 2.0, 2.0]
-            setpoint_yaw = -1.57
-            setpoint_yaw_speed = 0.1
-            self.publish_traj_setpoint(
-                setpoint_position,
-                setpoint_velocity,
-                setpoint_acceleration,
-                setpoint_jerk,
-                setpoint_yaw,
-                setpoint_yaw_speed,
-            )
-
-
-        if self.offboard_setpoint_counter_ >= 600:
-            self.engage_land_mode()
-
         self.publish_offboard_heartbeat()
         self.offboard_setpoint_counter_ += 1
 
@@ -169,9 +116,6 @@ class OffboardNode(Node):
         self.home_lat = msg.ref_lat
         self.home_lon = msg.ref_lon
         self.home_alt = msg._ref_alt
-        # self.get_logger().info(
-        #     f"Local pos Timestamp: {msg.timestamp} ref:{[msg.ref_lat, msg.ref_lon, msg.ref_alt]}"
-        # )
 
     def set_home_location(self):
         """
@@ -266,7 +210,7 @@ class OffboardNode(Node):
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_heartbeat_pub_.publish(msg)
-        self.get_logger().info("Publishing offboard heartbeat....")
+        self.get_logger().info(f"Publishing heartbeat mode: {'Velocity' if msg.velocity else 'Position'}")
 
     def engage_offboard_mode(self):
         """Switch mode to offboard mode"""
