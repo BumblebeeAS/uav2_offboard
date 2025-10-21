@@ -25,6 +25,9 @@ setup(
     license="TODO: License declaration",
     tests_require=["pytest"],
     entry_points={
-        "console_scripts": ["offboard_node = uav2_offboard.offboard_node:main"],
+        "console_scripts": [
+            "offboard_node = uav2_offboard.offboard_node:main",
+            "go_to_position_action_server = uav2_offboard.go_to_position_action_server:main",
+        ],
     },
 )
