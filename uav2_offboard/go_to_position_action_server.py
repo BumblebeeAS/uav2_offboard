@@ -85,7 +85,7 @@ class GoToPositionActionServer(Node):
         self._action_server = ActionServer(
             self,
             GoToPosition,
-            "go_to_position",
+            "uav2/go_to_position",
             execute_callback=self.execute_callback,
             goal_callback=self.goal_callback,
             cancel_callback=self.cancel_callback,
@@ -96,6 +96,7 @@ class GoToPositionActionServer(Node):
         self.current_goal = None
         self.goal_handle = None
         self.start_time = None
+        self.absolute_target = None  # Stores the computed absolute target position
 
         self.get_logger().info("GoToPosition action server started")
 
@@ -111,8 +112,9 @@ class GoToPositionActionServer(Node):
 
     def goal_callback(self, goal_request):
         """Accept or reject a client request to begin an action"""
+        mode = "relative" if goal_request.relative else "absolute"
         self.get_logger().info(
-            f"Received goal request: target=({goal_request.x}, {goal_request.y}, {goal_request.z})"
+            f"Received goal request ({mode}): target=({goal_request.x}, {goal_request.y}, {goal_request.z})"
         )
 
         # Validate thresholds
@@ -155,6 +157,26 @@ class GoToPositionActionServer(Node):
             result.message = "Failed to get valid position data"
             return result
 
+        # Compute absolute target position
+        if self.current_goal.relative:
+            # Relative mode: add offsets to current position
+            self.absolute_target = self.current_position + np.array(
+                [self.current_goal.x, self.current_goal.y, self.current_goal.z]
+            )
+            self.get_logger().info(
+                f"Relative mode: current=({self.current_position[0]:.2f}, {self.current_position[1]:.2f}, {self.current_position[2]:.2f}), "
+                f"offset=({self.current_goal.x:.2f}, {self.current_goal.y:.2f}, {self.current_goal.z:.2f}), "
+                f"absolute_target=({self.absolute_target[0]:.2f}, {self.absolute_target[1]:.2f}, {self.absolute_target[2]:.2f})"
+            )
+        else:
+            # Absolute mode: use goal coordinates directly
+            self.absolute_target = np.array(
+                [self.current_goal.x, self.current_goal.y, self.current_goal.z]
+            )
+            self.get_logger().info(
+                f"Absolute mode: target=({self.absolute_target[0]:.2f}, {self.absolute_target[1]:.2f}, {self.absolute_target[2]:.2f})"
+            )
+
         rate = self.create_rate(20)
 
         while rclpy.ok():
@@ -173,14 +195,12 @@ class GoToPositionActionServer(Node):
                 self.get_logger().info("Goal canceled")
                 self.current_goal = None
                 self.goal_handle = None
+                self.absolute_target = None
                 self.destroy_rate(rate)
                 return result
 
             # Calculate distance to goal
-            target_position = np.array(
-                [self.current_goal.x, self.current_goal.y, self.current_goal.z]
-            )
-            distance_vector = target_position - self.current_position
+            distance_vector = self.absolute_target - self.current_position
             distance_to_goal = np.linalg.norm(distance_vector)
 
             # Calculate individual axis errors
@@ -218,6 +238,7 @@ class GoToPositionActionServer(Node):
                 )
                 self.current_goal = None
                 self.goal_handle = None
+                self.absolute_target = None
                 self.destroy_rate(rate)
                 return result
 
@@ -235,15 +256,19 @@ class GoToPositionActionServer(Node):
         self.publisher_offboard_mode.publish(offboard_msg)
 
         # Only publish trajectory if we have an active goal and vehicle is in offboard mode
-        if self.current_goal is not None and (
-            self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
-            and self.arming_state == VehicleStatus.ARMING_STATE_ARMED
+        if (
+            self.current_goal is not None
+            and self.absolute_target is not None
+            and (
+                self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
+                and self.arming_state == VehicleStatus.ARMING_STATE_ARMED
+            )
         ):
             trajectory_msg = TrajectorySetpoint()
             trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-            trajectory_msg.position[0] = self.current_goal.x
-            trajectory_msg.position[1] = self.current_goal.y
-            trajectory_msg.position[2] = self.current_goal.z
+            trajectory_msg.position[0] = self.absolute_target[0]
+            trajectory_msg.position[1] = self.absolute_target[1]
+            trajectory_msg.position[2] = self.absolute_target[2]
             trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
             self.publisher_trajectory.publish(trajectory_msg)
 
