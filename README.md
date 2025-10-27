@@ -39,7 +39,7 @@ ros2 run uav2_offboard go_to_position_action_server
 In another terminal:
 
 ```bash
-ros2 action send_goal /go_to_position uav2_offboard/action/GoToPosition "{x: 5.0, y: 5.0, z: -2.0, x_threshold: 0.5, y_threshold: 0.5, z_threshold: 0.5, timeout: 60.0}" --feedback
+ros2 action send_goal /go_to_position uav2_offboard/action/GoToPosition "{x: 5.0, y: 5.0, z: -2.0, x_threshold: 0.5, y_threshold: 0.5, z_threshold: 0.5}" --feedback
 ```
 
 ### How It Works
