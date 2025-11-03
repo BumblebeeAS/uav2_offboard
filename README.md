@@ -1,48 +1,40 @@
 # UAV2 Offboard
 
-Offboard package for drone behaviours and missions
+Offboard package for drone behaviors and missions.
 
-## Running the sim
+## Quickstart
 
-On separate terminals:
+0. Ensure that **PX4 is running** and connected via XRCE-DDS
 
-1. Start the Default Gazebo sim
-   ```bash
-   make px4_sitl gz_x500
-   ```
-2. Start px4-ros2 bridge
-   ```bash
-   MicroXRCEAgent udp4 -p 8888
-   ```
-3. Launch the package
-   ```bash
-   ros2 launch uav2_offboard launch.py
-   ```
-
-## GoToPosition Action Server
-
-An action server for PX4 offboard control that commands the vehicle to navigate to a target position with configurable thresholds and timeout.
-
-### Usage
-
-Before using the action server, ensure:
-
-1. **PX4 is running** and connected via XRCE-DDS
-2. **Vehicle is armed** and in **offboard mode**
-
-In one terminal:
+1. In a separate terminal,
 
 ```bash
-ros2 run uav2_offboard go_to_position_action_server
+ros2 launch uav2_offboard launch.py
 ```
 
-In another terminal:
+2. Takeoff
 
 ```bash
-ros2 action send_goal /uav2/go_to_position bb_uav_msgs/action/GoToPosition "{x: 5.0, y: 5.0, z: -2.0, relative: false, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
+ros2 action send_goal /takeoff bb_uav_msgs/action/Takeoff "{altitude: 3.0, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
 ```
 
-### How It Works
+3. Move
+
+```bash
+ros2 action send_goal /go_to_position bb_uav_msgs/action/GoToPosition "{x: 3.0, y: 3.0, z: -2.0, relative: false, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
+```
+
+4. Land
+
+```bash
+ros2 service call /offboard_node/land std_srvs/srv/Trigger "{}"
+```
+
+## Usage
+
+The vehicle can be in any mode or the `Takeoff` action but it must be armed and in "Offboard" flight mode for the `GoToPosition` action.
+
+## How It Works
 
 1. The action server continuously publishes `OffboardControlMode` messages at 50 Hz to maintain offboard mode
 2. When a goal is received, it starts commanding the target position via `TrajectorySetpoint` messages

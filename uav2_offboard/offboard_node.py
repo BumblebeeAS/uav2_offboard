@@ -2,11 +2,11 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_srvs.srv import Trigger
 
 from px4_msgs.msg import (
     OffboardControlMode,
     TakeoffStatus,
-    TrajectorySetpoint,
     VehicleCommand,
     VehicleLocalPosition,
     VehicleStatus,
@@ -22,37 +22,30 @@ class OffboardNode(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
-        self.declare_parameter("vehicle_status_topic", "")
-        self.declare_parameter("offboard_heartbeat_topic", "")
-        self.declare_parameter("takeoff_status_topic", "")
-        self.declare_parameter("vehicle_command_topic", "")
-        self.declare_parameter("traj_setpoint_topic", "")
-        self.declare_parameter("local_pos_topic", "")
+        self.local_pos_topic = (
+            self.declare_parameter("local_pos_topic", "")
+            .get_parameter_value()
+            .string_value
+        )
         self.vehicle_status_topic = (
-            self.get_parameter("vehicle_status_topic")
+            self.declare_parameter("vehicle_status_topic", "")
             .get_parameter_value()
             .string_value
         )
         self.offboard_heartbeat_topic = (
-            self.get_parameter("offboard_heartbeat_topic")
+            self.declare_parameter("offboard_heartbeat_topic", "")
             .get_parameter_value()
             .string_value
         )
         self.takeoff_status_topic = (
-            self.get_parameter("takeoff_status_topic")
+            self.declare_parameter("takeoff_status_topic", "")
             .get_parameter_value()
             .string_value
         )
         self.vehicle_command_topic = (
-            self.get_parameter("vehicle_command_topic")
+            self.declare_parameter("vehicle_command_topic", "")
             .get_parameter_value()
             .string_value
-        )
-        self.traj_setpoint_topic = (
-            self.get_parameter("traj_setpoint_topic").get_parameter_value().string_value
-        )
-        self.local_pos_topic = (
-            self.get_parameter("local_pos_topic").get_parameter_value().string_value
         )
 
         self.vehicle_status_sub_ = self.create_subscription(
@@ -73,9 +66,6 @@ class OffboardNode(Node):
         self.vehicle_command_pub_ = self.create_publisher(
             VehicleCommand, self.vehicle_command_topic, self.qos_profile
         )
-        self.traj_setpoint_pub_ = self.create_publisher(
-            TrajectorySetpoint, self.traj_setpoint_topic, self.qos_profile
-        )
         self.local_pos_sub_ = self.create_subscription(
             VehicleLocalPosition,
             self.local_pos_topic,
@@ -87,6 +77,10 @@ class OffboardNode(Node):
         self.home_lon = 0.0
         self.home_alt = 0.0
         self.set_home_location()
+
+        # Create service server for land
+        self.land_service_ = self.create_service(Trigger, "~/land", self.land_callback)
+
         self.timer_ = self.create_timer(0.1, self.timer_callback)
 
     def timer_callback(self):
@@ -124,46 +118,6 @@ class OffboardNode(Node):
         # Debug need to check whether home location works
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_HOME, param1=1.0)
         self.get_logger().info("Set home location...")
-
-    # TODO Implement waypointing in the future
-    # TODO Keep as an arbitary value to test states
-    def publish_traj_setpoint(
-        self, position, velocity, acceleration, jerk, yaw, yaw_speed
-    ):
-        """# Trajectory setpoint in NED frame
-        # Input to PID position controller.
-        # Needs to be kinematically consistent and feasible for smooth flight.
-        # setting a value to NaN means the state should not be controlled
-
-        uint64 timestamp # time since system start (microseconds)
-
-        # NED local world frame
-        float32[3] position # in meters
-        float32[3] velocity # in meters/second
-        float32[3] acceleration # in meters/second^2
-        float32[3] jerk # in meters/second^3 (for logging only)
-
-        float32 yaw # euler angle of desired attitude in radians -PI..+PI
-        float32 yaw_speed # angular velocity around NED frame z-axis in radians/second
-        """
-        msg = TrajectorySetpoint()
-        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        msg.position = position
-        msg.velocity = velocity
-        msg.acceleration = acceleration
-        msg.jerk = jerk
-        msg.yaw = yaw
-        msg.yawspeed = yaw_speed
-        self.traj_setpoint_pub_.publish(msg)
-        self.get_logger().info(
-            f"Traj setpoint sent position"
-            f"{msg.position}\n"
-            f"velocity:{msg.velocity}\n"
-            f"acceleration:{msg.acceleration}\n"
-            f"jerk:{msg.jerk}\n"
-            f"yaw:{msg.yaw}\n"
-            f"msg.yaw_speed{msg.yawspeed}\n"
-        )
 
     def publish_vehicle_command(self, command, **params) -> None:
         """Publish a vehicle command."""
@@ -229,12 +183,42 @@ class OffboardNode(Node):
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND, param2=1.0)
         self.get_logger().info("Sent Land command....")
 
+    def land_callback(self, request, response):
+        """
+        Service callback for land request.
+
+        Args:
+            request: Land.Request
+            response: Land.Response with success and message fields
+
+        Returns:
+            response: Land.Response
+        """
+        try:
+            self.get_logger().info(f"Land service called")
+            self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
+
+            response.success = True
+            response.message = f"Land command sent."
+            self.get_logger().info(response.message)
+
+        except Exception as e:
+            response.success = False
+            response.message = f"Land failed: {str(e)}"
+            self.get_logger().error(response.message)
+
+        return response
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = OffboardNode()
-    rclpy.spin(node)
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

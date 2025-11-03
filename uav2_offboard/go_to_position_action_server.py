@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import numpy as np
 import rclpy
-from bb_uav_msgs.action import GoToPosition
+from bb_uav_msgs.action import GoToPosition, Takeoff
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -16,6 +16,7 @@ from rclpy.qos import (
 from px4_msgs.msg import (
     OffboardControlMode,
     TrajectorySetpoint,
+    VehicleCommand,
     VehicleLocalPosition,
     VehicleStatus,
 )
@@ -67,6 +68,9 @@ class GoToPositionActionServer(Node):
         self.publisher_trajectory = self.create_publisher(
             TrajectorySetpoint, "fmu/in/trajectory_setpoint", qos_profile_pub
         )
+        self.publisher_vehicle_command = self.create_publisher(
+            VehicleCommand, "fmu/in/vehicle_command", qos_profile_pub
+        )
 
         # Control timer
         timer_period = 0.02  # 50 Hz
@@ -85,9 +89,20 @@ class GoToPositionActionServer(Node):
         self._action_server = ActionServer(
             self,
             GoToPosition,
-            "uav2/go_to_position",
+            "go_to_position",
             execute_callback=self.execute_callback,
             goal_callback=self.goal_callback,
+            cancel_callback=self.cancel_callback,
+            callback_group=self.callback_group,
+        )
+
+        # Takeoff action server
+        self._takeoff_action_server = ActionServer(
+            self,
+            Takeoff,
+            "takeoff",
+            execute_callback=self.execute_takeoff_callback,
+            goal_callback=self.takeoff_goal_callback,
             cancel_callback=self.cancel_callback,
             callback_group=self.callback_group,
         )
@@ -99,6 +114,37 @@ class GoToPositionActionServer(Node):
         self.absolute_target = None  # Stores the computed absolute target position
 
         self.get_logger().info("GoToPosition action server started")
+
+    # -------------------- Vehicle Command Helpers --------------------
+    def publish_vehicle_command(self, command, **params) -> None:
+        msg = VehicleCommand()
+        msg.command = command
+        msg.param1 = params.get("param1", 0.0)
+        msg.param2 = params.get("param2", 0.0)
+        msg.param3 = params.get("param3", 0.0)
+        msg.param4 = params.get("param4", 0.0)
+        msg.param5 = params.get("param5", 0.0)
+        msg.param6 = params.get("param6", 0.0)
+        msg.param7 = params.get("param7", 0.0)
+        msg.target_system = 1
+        msg.target_component = 1
+        msg.source_system = 1
+        msg.source_component = 1
+        msg.from_external = True
+        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        self.publisher_vehicle_command.publish(msg)
+
+    def arm(self):
+        self.publish_vehicle_command(
+            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0
+        )
+        self.get_logger().info("Arm command sent....")
+
+    def engage_offboard_mode(self):
+        self.publish_vehicle_command(
+            VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0
+        )
+        self.get_logger().info("Switching to offboard mode....")
 
     def vehicle_status_callback(self, msg):
         """Update vehicle navigation and arming state"""
@@ -133,21 +179,112 @@ class GoToPositionActionServer(Node):
         self.get_logger().info("Received cancel request")
         return CancelResponse.ACCEPT
 
+    def takeoff_goal_callback(self, goal_request):
+        """Validate Takeoff goal"""
+        self.get_logger().info(
+            f"Received takeoff request: altitude={goal_request.altitude:.2f} m"
+        )
+
+        if goal_request.altitude <= 0:
+            self.get_logger().warn("Invalid altitude: must be positive meters")
+            return GoalResponse.REJECT
+
+        # Optional: reject if another goal in progress
+        if self.current_goal is not None:
+            self.get_logger().warn("Another goal is in progress; rejecting takeoff")
+            return GoalResponse.REJECT
+
+        return GoalResponse.ACCEPT
+
+    async def execute_takeoff_callback(self, goal_handle):
+        self.get_logger().info("Executing takeoff goal...")
+
+        start_time = self.get_clock().now()
+        feedback = Takeoff.Feedback()
+
+        if not self.position_valid:
+            self.get_logger().error("Failed to get valid position data")
+            goal_handle.abort()
+            result = Takeoff.Result()
+            result.success = False
+            result.message = "Failed to get valid position data"
+            return result
+
+        self.current_goal = goal_handle.request
+
+        # Ensure offboard mode and arm
+        self.engage_offboard_mode()
+        self.arm()
+
+        # Compute absolute target: climb up 'altitude' meters (NED: z negative up)
+        altitude = float(goal_handle.request.altitude)
+        target = self.current_position.copy()
+        target[2] = self.current_position[2] - altitude
+        self.absolute_target = target
+
+        rate = self.create_rate(20)
+
+        while rclpy.ok():
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                self.current_goal = None
+                self.absolute_target = None
+                self.destroy_rate(rate)
+                result = Takeoff.Result()
+                result.success = False
+                result.final_z = float(self.current_position[2])
+                result.time_elapsed = (
+                    self.get_clock().now() - start_time
+                ).nanoseconds / 1e9
+                result.message = "Takeoff canceled"
+                self.get_logger().info(result.message)
+                return result
+
+            # Errors
+            distance_vector = self.absolute_target - self.current_position
+            x_error = abs(distance_vector[0])
+            y_error = abs(distance_vector[1])
+            z_error = abs(distance_vector[2])
+
+            # Feedback
+            feedback.current_z = float(self.current_position[2])
+            feedback.altitude_to_goal = float(
+                altitude - (self.current_position[2] - target[2])
+            )
+            goal_handle.publish_feedback(feedback)
+
+            # Completion check
+            if (
+                x_error <= self.current_goal.x_threshold
+                and y_error <= self.current_goal.y_threshold
+                and z_error <= self.current_goal.z_threshold
+            ):
+                goal_handle.succeed()
+                self.current_goal = None
+                self.absolute_target = None
+                self.destroy_rate(rate)
+                result = Takeoff.Result()
+                result.success = True
+                result.final_x = float(self.current_position[0])
+                result.final_y = float(self.current_position[1])
+                result.final_z = float(self.current_position[2])
+                result.time_elapsed = (
+                    self.get_clock().now() - start_time
+                ).nanoseconds / 1e9
+                result.message = "Takeoff reached target altitude"
+                self.get_logger().info(result.message)
+                return result
+
+            rate.sleep()
+
     async def execute_callback(self, goal_handle):
         """Execute the goal"""
         self.get_logger().info("Executing goal...")
 
-        self.goal_handle = goal_handle
         self.current_goal = goal_handle.request
         self.start_time = self.get_clock().now()
 
         feedback_msg = GoToPosition.Feedback()
-
-        # Wait for position to be valid
-        timeout_counter = 0
-        while not self.position_valid and timeout_counter < 100:
-            await rclpy.task.sleep(0.1)
-            timeout_counter += 1
 
         if not self.position_valid:
             self.get_logger().error("Failed to get valid position data")
@@ -156,6 +293,8 @@ class GoToPositionActionServer(Node):
             result.success = False
             result.message = "Failed to get valid position data"
             return result
+
+        self.goal_handle = goal_handle
 
         # Compute absolute target position
         if self.current_goal.relative:
