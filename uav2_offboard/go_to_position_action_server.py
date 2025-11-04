@@ -35,12 +35,44 @@ class GoToPositionActionServer(Node):
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1,
         )
-
         qos_profile_sub = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             durability=QoSDurabilityPolicy.VOLATILE,
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1,
+        )
+
+        # Parameters
+        vehicle_status_topic = (
+            self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status")
+            .get_parameter_value()
+            .string_value
+        )
+        vehicle_local_position_topic = (
+            self.declare_parameter(
+                "vehicle_local_position_topic", "/fmu/out/vehicle_local_position"
+            )
+            .get_parameter_value()
+            .string_value
+        )
+        offboard_control_mode_topic = (
+            self.declare_parameter(
+                "offboard_control_mode_topic", "/fmu/in/offboard_control_mode"
+            )
+            .get_parameter_value()
+            .string_value
+        )
+        trajectory_setpoint_topic = (
+            self.declare_parameter(
+                "trajectory_setpoint_topic", "/fmu/in/trajectory_setpoint"
+            )
+            .get_parameter_value()
+            .string_value
+        )
+        vehicle_command_topic = (
+            self.declare_parameter("vehicle_command_topic", "/fmu/in/vehicle_command")
+            .get_parameter_value()
+            .string_value
         )
 
         # Create callback group for concurrent execution
@@ -49,27 +81,26 @@ class GoToPositionActionServer(Node):
         # Subscribers
         self.status_sub = self.create_subscription(
             VehicleStatus,
-            "fmu/out/vehicle_status_v1",
+            vehicle_status_topic,
             self.vehicle_status_callback,
             qos_profile_sub,
         )
-
         self.local_pos_sub = self.create_subscription(
             VehicleLocalPosition,
-            "fmu/out/vehicle_local_position",
+            vehicle_local_position_topic,
             self.local_position_callback,
             qos_profile_sub,
         )
 
         # Publishers
         self.publisher_offboard_mode = self.create_publisher(
-            OffboardControlMode, "fmu/in/offboard_control_mode", qos_profile_pub
+            OffboardControlMode, offboard_control_mode_topic, qos_profile_pub
         )
         self.publisher_trajectory = self.create_publisher(
-            TrajectorySetpoint, "fmu/in/trajectory_setpoint", qos_profile_pub
+            TrajectorySetpoint, trajectory_setpoint_topic, qos_profile_pub
         )
         self.publisher_vehicle_command = self.create_publisher(
-            VehicleCommand, "fmu/in/vehicle_command", qos_profile_pub
+            VehicleCommand, vehicle_command_topic, qos_profile_pub
         )
 
         # Control timer

@@ -4,75 +4,50 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import Trigger
 
-from px4_msgs.msg import (
-    OffboardControlMode,
-    TakeoffStatus,
-    VehicleCommand,
-    VehicleLocalPosition,
-    VehicleStatus,
-)
+from px4_msgs.msg import OffboardControlMode, VehicleCommand, VehicleLocalPosition
 
 
 class OffboardNode(Node):
     def __init__(self):
         super().__init__("offboard_node")
-        self.qos_profile = QoSProfile(
+
+        local_pos_topic = (
+            self.declare_parameter("local_pos_topic", "/fmu/out/vehicle_local_position")
+            .get_parameter_value()
+            .string_value
+        )
+        offboard_heartbeat_topic = (
+            self.declare_parameter(
+                "offboard_heartbeat_topic", "/fmu/in/offboard_control_mode"
+            )
+            .get_parameter_value()
+            .string_value
+        )
+        vehicle_command_topic = (
+            self.declare_parameter("vehicle_command_topic", "/fmu/in/vehicle_command")
+            .get_parameter_value()
+            .string_value
+        )
+
+        qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.SYSTEM_DEFAULT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
-        self.local_pos_topic = (
-            self.declare_parameter("local_pos_topic", "")
-            .get_parameter_value()
-            .string_value
-        )
-        self.vehicle_status_topic = (
-            self.declare_parameter("vehicle_status_topic", "")
-            .get_parameter_value()
-            .string_value
-        )
-        self.offboard_heartbeat_topic = (
-            self.declare_parameter("offboard_heartbeat_topic", "")
-            .get_parameter_value()
-            .string_value
-        )
-        self.takeoff_status_topic = (
-            self.declare_parameter("takeoff_status_topic", "")
-            .get_parameter_value()
-            .string_value
-        )
-        self.vehicle_command_topic = (
-            self.declare_parameter("vehicle_command_topic", "")
-            .get_parameter_value()
-            .string_value
-        )
-
-        self.vehicle_status_sub_ = self.create_subscription(
-            VehicleStatus,
-            self.vehicle_status_topic,
-            self.vehicle_status_callback,
-            self.qos_profile,
-        )
         self.offboard_heartbeat_pub_ = self.create_publisher(
-            OffboardControlMode, self.offboard_heartbeat_topic, self.qos_profile
-        )
-        self.takeoff_status_sub_ = self.create_subscription(
-            TakeoffStatus,
-            self.takeoff_status_topic,
-            self.takeoff_status_callback,
-            self.qos_profile,
+            OffboardControlMode, offboard_heartbeat_topic, qos_profile
         )
         self.vehicle_command_pub_ = self.create_publisher(
-            VehicleCommand, self.vehicle_command_topic, self.qos_profile
+            VehicleCommand, vehicle_command_topic, qos_profile
         )
         self.local_pos_sub_ = self.create_subscription(
             VehicleLocalPosition,
-            self.local_pos_topic,
+            local_pos_topic,
             self.local_pos_callback,
-            self.qos_profile,
+            qos_profile,
         )
-        self.offboard_setpoint_counter_ = 0
+
         self.home_lat = 0.0
         self.home_lon = 0.0
         self.home_alt = 0.0
@@ -81,28 +56,11 @@ class OffboardNode(Node):
         # Create service server for land
         self.land_service_ = self.create_service(Trigger, "~/land", self.land_callback)
 
-        self.timer_ = self.create_timer(0.1, self.timer_callback)
-
-    def timer_callback(self):
-        """
-        Continuously publish heartbeat and traj setpoint.
-        PX4 requires that the vehicle is already receiving
-        OffboardControlMode messages before it will arm in offboard mode,
-        or before it will switch to offboard mode when flying
-        """
-        self.publish_offboard_heartbeat()
-        self.offboard_setpoint_counter_ += 1
-
-    def vehicle_status_callback(self, msg: VehicleStatus):
-        self.offboard_status = msg.nav_state == 14
-        self.get_logger().info(
-            f"Vehicle Status Timestamp: {msg.timestamp} Offboard status(14):{msg.nav_state}"
-        )
-
-    def takeoff_status_callback(self, msg: TakeoffStatus):
-        self.get_logger().info(
-            f"TAKEOFF Timestamp: {msg.timestamp} Status:{msg.takeoff_state}"
-        )
+        # Continuously publish heartbeat and traj setpoint.
+        # PX4 requires that the vehicle is already receiving
+        # OffboardControlMode messages before it will arm in offboard mode,
+        # or before it will switch to offboard mode when flying
+        self.timer_ = self.create_timer(0.1, self.publish_offboard_heartbeat)
 
     def local_pos_callback(self, msg: VehicleLocalPosition):
         self.home_lat = msg.ref_lat

@@ -1,0 +1,12 @@
+/**/offboard_node:
+  ros__parameters:
+    local_pos_topic: /fmu/out/vehicle_local_position
+    offboard_heartbeat_topic: /fmu/in/offboard_control_mode
+    vehicle_command_topic: /fmu/in/vehicle_command
+/**/go_to_position_action_server:
+  ros__parameters:
+    offboard_control_mode_topic: /fmu/in/offboard_control_mode
+    trajectory_setpoint_topic: /fmu/in/trajectory_setpoint
+    vehicle_command_topic: /fmu/in/vehicle_command
+    vehicle_local_position_topic: /fmu/out/vehicle_local_position
+    vehicle_status_topic: /fmu/out/vehicle_status_v1

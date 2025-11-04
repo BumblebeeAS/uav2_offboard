@@ -15,19 +15,19 @@ ros2 launch uav2_offboard launch.py
 2. Takeoff
 
 ```bash
-ros2 action send_goal /takeoff bb_uav_msgs/action/Takeoff "{altitude: 3.0, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
+ros2 action send_goal /uav2/takeoff bb_uav_msgs/action/Takeoff "{altitude: 3.0, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
 ```
 
 3. Move
 
 ```bash
-ros2 action send_goal /go_to_position bb_uav_msgs/action/GoToPosition "{x: 3.0, y: 3.0, z: -2.0, relative: false, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
+ros2 action send_goal /uav2/go_to_position bb_uav_msgs/action/GoToPosition "{x: 3.0, y: 3.0, z: -2.0, relative: false, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
 ```
 
 4. Land
 
 ```bash
-ros2 service call /offboard_node/land std_srvs/srv/Trigger "{}"
+ros2 service call /uav2/offboard_node/land std_srvs/srv/Trigger "{}"
 ```
 
 ## Usage
