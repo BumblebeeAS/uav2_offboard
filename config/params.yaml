@@ -3,7 +3,7 @@
     local_pos_topic: /fmu/out/vehicle_local_position
     offboard_heartbeat_topic: /fmu/in/offboard_control_mode
     vehicle_command_topic: /fmu/in/vehicle_command
-/**/go_to_position_action_server:
+/**/go_to_action_server:
   ros__parameters:
     offboard_control_mode_topic: /fmu/in/offboard_control_mode
     trajectory_setpoint_topic: /fmu/in/trajectory_setpoint

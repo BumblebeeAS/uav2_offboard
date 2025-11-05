@@ -22,8 +22,8 @@ def generate_launch_description():
         ),
         Node(
             package="uav2_offboard",
-            executable="go_to_position_action_server",
-            name="go_to_position_action_server",
+            executable="go_to_action_server",
+            name="go_to_action_server",
             parameters=[config],
         ),
     ]
