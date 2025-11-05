@@ -107,12 +107,13 @@ class GoToPositionActionServer(Node):
             VehicleCommand, vehicle_command_topic, qos_profile_pub
         )
 
-        # Control timer
-        timer_period = 0.02  # 50 Hz
-        self.timer = self.create_timer(
-            timer_period, self.control_loop_callback, callback_group=self.callback_group
+        # Continuously publish heartbeat and traj setpoint.
+        # PX4 requires that the vehicle is already receiving
+        # OffboardControlMode messages before it will arm in offboard mode,
+        # or before it will switch to offboard mode when flying
+        self.timer_ = self.create_timer(
+            0.02, self.control_loop_callback, callback_group=self.callback_group
         )
-        self.dt = timer_period
 
         # Vehicle state
         self.nav_state = VehicleStatus.NAVIGATION_STATE_MAX
@@ -149,6 +150,7 @@ class GoToPositionActionServer(Node):
         self.get_logger().info("GoToPosition action server started")
 
     # -------------------- Vehicle Command Helpers --------------------
+
     def publish_vehicle_command(self, command, **params) -> None:
         msg = VehicleCommand()
         msg.command = command
@@ -188,6 +190,38 @@ class GoToPositionActionServer(Node):
         """Update current position from vehicle"""
         self.current_position = np.array([msg.x, msg.y, msg.z])
         self.position_valid = True
+
+    def control_loop_callback(self):
+        """High-rate control loop for publishing offboard commands"""
+        # Always publish offboard control mode to keep the connection alive
+        offboard_msg = OffboardControlMode()
+        offboard_msg.position = True
+        offboard_msg.velocity = False
+        offboard_msg.acceleration = False
+        offboard_msg.attitude = False
+        offboard_msg.body_rate = False
+        offboard_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+
+        self.publisher_offboard_mode.publish(offboard_msg)
+
+        # Only publish trajectory if we have an active goal and vehicle is in offboard mode
+        if (
+            self.current_goal is not None
+            and self.absolute_target is not None
+            and (
+                self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
+                and self.arming_state == VehicleStatus.ARMING_STATE_ARMED
+            )
+        ):
+            trajectory_msg = TrajectorySetpoint()
+            trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+            trajectory_msg.position[0] = self.absolute_target[0]
+            trajectory_msg.position[1] = self.absolute_target[1]
+            trajectory_msg.position[2] = self.absolute_target[2]
+            trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
+            self.publisher_trajectory.publish(trajectory_msg)
+
+    # -------------------- Action Server Callbacks --------------------
 
     def validate_goal(self, goal: GeneralGoal) -> bool:
         if goal.x_threshold <= 0 or goal.y_threshold <= 0 or goal.z_threshold <= 0:
@@ -357,33 +391,6 @@ class GoToPositionActionServer(Node):
             goal_handle, general_goal, publish_feedback_fn=publish_feedback_fn
         )
         return Takeoff.Result(result=goto_result)
-
-    def control_loop_callback(self):
-        """High-rate control loop for publishing offboard commands"""
-        # Always publish offboard control mode to keep the connection alive
-        offboard_msg = OffboardControlMode()
-        offboard_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        offboard_msg.position = True
-        offboard_msg.velocity = False
-        offboard_msg.acceleration = False
-        self.publisher_offboard_mode.publish(offboard_msg)
-
-        # Only publish trajectory if we have an active goal and vehicle is in offboard mode
-        if (
-            self.current_goal is not None
-            and self.absolute_target is not None
-            and (
-                self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
-                and self.arming_state == VehicleStatus.ARMING_STATE_ARMED
-            )
-        ):
-            trajectory_msg = TrajectorySetpoint()
-            trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-            trajectory_msg.position[0] = self.absolute_target[0]
-            trajectory_msg.position[1] = self.absolute_target[1]
-            trajectory_msg.position[2] = self.absolute_target[2]
-            trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
-            self.publisher_trajectory.publish(trajectory_msg)
 
 
 def main(args=None):

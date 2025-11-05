@@ -4,7 +4,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import Trigger
 
-from px4_msgs.msg import OffboardControlMode, VehicleCommand, VehicleLocalPosition
+from px4_msgs.msg import VehicleCommand, VehicleLocalPosition
 
 
 class OffboardNode(Node):
@@ -13,13 +13,6 @@ class OffboardNode(Node):
 
         local_pos_topic = (
             self.declare_parameter("local_pos_topic", "/fmu/out/vehicle_local_position")
-            .get_parameter_value()
-            .string_value
-        )
-        offboard_heartbeat_topic = (
-            self.declare_parameter(
-                "offboard_heartbeat_topic", "/fmu/in/offboard_control_mode"
-            )
             .get_parameter_value()
             .string_value
         )
@@ -34,9 +27,6 @@ class OffboardNode(Node):
             durability=DurabilityPolicy.SYSTEM_DEFAULT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
-        )
-        self.offboard_heartbeat_pub_ = self.create_publisher(
-            OffboardControlMode, offboard_heartbeat_topic, qos_profile
         )
         self.vehicle_command_pub_ = self.create_publisher(
             VehicleCommand, vehicle_command_topic, qos_profile
@@ -55,12 +45,6 @@ class OffboardNode(Node):
 
         # Create service server for land
         self.land_service_ = self.create_service(Trigger, "~/land", self.land_callback)
-
-        # Continuously publish heartbeat and traj setpoint.
-        # PX4 requires that the vehicle is already receiving
-        # OffboardControlMode messages before it will arm in offboard mode,
-        # or before it will switch to offboard mode when flying
-        self.timer_ = self.create_timer(0.1, self.publish_offboard_heartbeat)
 
     def local_pos_callback(self, msg: VehicleLocalPosition):
         self.home_lat = msg.ref_lat
@@ -109,17 +93,6 @@ class OffboardNode(Node):
             VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0
         )
         self.get_logger().info("Disarm command sent....")
-
-    def publish_offboard_heartbeat(self):
-        """Publish offboard heartbeat."""
-        msg = OffboardControlMode()
-        msg.position = True
-        msg.velocity = False
-        msg.acceleration = False
-        msg.attitude = False
-        msg.body_rate = False
-        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-        self.offboard_heartbeat_pub_.publish(msg)
 
     def engage_offboard_mode(self):
         """Switch mode to offboard mode"""

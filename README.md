@@ -4,7 +4,7 @@ Offboard package for drone behaviors and missions.
 
 ## Quickstart
 
-0. Ensure that **PX4 is running** and connected via XRCE-DDS
+0. Ensure that **PX4 is running** and connected via XRCE-DDS.
 
 1. In a separate terminal,
 
@@ -32,7 +32,7 @@ ros2 service call /uav2/offboard_node/land std_srvs/srv/Trigger "{}"
 
 ## Usage
 
-The vehicle can be in any mode or the `Takeoff` action but it must be armed and in "Offboard" flight mode for the `GoToPosition` action.
+The vehicle can be in any mode for the `Takeoff` action but it must be armed and in "Offboard" flight mode for the `GoToPosition` action.
 
 ## How It Works
 
