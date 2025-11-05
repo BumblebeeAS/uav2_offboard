@@ -20,12 +20,6 @@ def generate_launch_description():
             name="offboard_node",
             parameters=[config],
         ),
-        Node(
-            package="uav2_offboard",
-            executable="go_to_action_server",
-            name="go_to_action_server",
-            parameters=[config],
-        ),
     ]
 
     return LaunchDescription(nodes)

@@ -31,7 +31,6 @@ setup(
     entry_points={
         "console_scripts": [
             "offboard_node = uav2_offboard.offboard_node:main",
-            "go_to_action_server = uav2_offboard.go_to_action_server:main",
         ],
     },
 )
