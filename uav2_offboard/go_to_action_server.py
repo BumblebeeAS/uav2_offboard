@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 from typing import Callable
 
 import numpy as np
@@ -15,6 +15,7 @@ from rclpy.qos import (
     QoSProfile,
     QoSReliabilityPolicy,
 )
+from std_srvs.srv import Trigger
 
 from px4_msgs.msg import (
     OffboardControlMode,
@@ -121,11 +122,14 @@ class GoToPositionActionServer(Node):
         self.current_position = np.array([0.0, 0.0, 0.0])
         self.position_valid = False
 
+        # Service servers
+        self.land_service_ = self.create_service(Trigger, "~/land", self.land_callback)
+
         # Action servers
         self._goto_position_action_server = ActionServer(
             self,
             GoToPosition,
-            "go_to_position",
+            "~/go_to_position",
             execute_callback=self.execute_goto_position_callback,
             goal_callback=self.goto_position_goal_callback,
             cancel_callback=self.cancel_callback,
@@ -134,7 +138,7 @@ class GoToPositionActionServer(Node):
         self._takeoff_action_server = ActionServer(
             self,
             Takeoff,
-            "takeoff",
+            "~/takeoff",
             execute_callback=self.execute_takeoff_callback,
             goal_callback=self.takeoff_goal_callback,
             cancel_callback=self.cancel_callback,
@@ -169,17 +173,44 @@ class GoToPositionActionServer(Node):
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.publisher_vehicle_command.publish(msg)
 
+    def set_home_location(self):
+        """
+        set home position to current location
+        Changes the home location either to the current location or a specified location.
+        |Use current (1=use current location, 0=use specified location)| Empty| Empty| Empty| Latitude| Longitude| Altitude|
+        """
+        # Debug need to check whether home location works
+        self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_HOME, param1=1.0)
+        self.get_logger().info("Set home location...")
+
     def arm(self):
+        """Arm drone. Param1=1.0 for arm."""
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0
         )
         self.get_logger().info("Arm command sent....")
 
+    def disarm(self):
+        """Disarm drone. Param1=0.0 for disarm."""
+        self.publish_vehicle_command(
+            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0
+        )
+        self.get_logger().info("Disarm command sent....")
+
     def engage_offboard_mode(self):
+        """Switch mode to offboard mode"""
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0
         )
         self.get_logger().info("Switching to offboard mode....")
+
+    def engage_land_mode(self):
+        """
+        Land at location.
+        |Unused|Unused|Unused|Desired yaw angle.|Latitude|Longitude|Altitude|
+        """
+        self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
+        self.get_logger().info("Sent Land command....")
 
     def vehicle_status_callback(self, msg: VehicleStatus):
         """Update vehicle navigation and arming state"""
@@ -220,6 +251,34 @@ class GoToPositionActionServer(Node):
             trajectory_msg.position[2] = self.absolute_target[2]
             trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
             self.publisher_trajectory.publish(trajectory_msg)
+
+    # -------------------- Service Callbacks --------------------
+
+    def land_callback(self, request: Trigger.Request, response: Trigger.Response):
+        """
+        Service callback for land request.
+
+        Args:
+            request: Trigger.Request
+            response: Trigger.Response with success and message fields
+
+        Returns:
+            response: Trigger.Response
+        """
+        try:
+            self.get_logger().info(f"Land service called")
+            self.engage_land_mode()
+
+            response.success = True
+            response.message = f"Land command sent."
+            self.get_logger().info(response.message)
+
+        except Exception as e:
+            response.success = False
+            response.message = f"Land failed: {str(e)}"
+            self.get_logger().error(response.message)
+
+        return response
 
     # -------------------- Action Server Callbacks --------------------
 
