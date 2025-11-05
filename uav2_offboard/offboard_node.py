@@ -124,6 +124,10 @@ class GoToPositionActionServer(Node):
 
         # Service servers
         self.land_service_ = self.create_service(Trigger, "~/land", self.land_callback)
+        self.set_home_service_ = self.create_service(
+            Trigger, "~/set_home", self.set_home_callback
+        )
+        self.rtl_service_ = self.create_service(Trigger, "~/rtl", self.rtl_callback)
 
         # Action servers
         self._goto_position_action_server = ActionServer(
@@ -182,6 +186,11 @@ class GoToPositionActionServer(Node):
         # Debug need to check whether home location works
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_HOME, param1=1.0)
         self.get_logger().info("Set home location...")
+
+    def rtl(self):
+        """Return to launch command"""
+        self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_RETURN_TO_LAUNCH)
+        self.get_logger().info("RTL command sent....")
 
     def arm(self):
         """Arm drone. Param1=1.0 for arm."""
@@ -254,7 +263,9 @@ class GoToPositionActionServer(Node):
 
     # -------------------- Service Callbacks --------------------
 
-    def land_callback(self, request: Trigger.Request, response: Trigger.Response):
+    def land_callback(
+        self, request: Trigger.Request, response: Trigger.Response
+    ) -> Trigger.Response:
         """
         Service callback for land request.
 
@@ -276,6 +287,62 @@ class GoToPositionActionServer(Node):
         except Exception as e:
             response.success = False
             response.message = f"Land failed: {str(e)}"
+            self.get_logger().error(response.message)
+
+        return response
+
+    def set_home_callback(
+        self, request: Trigger.Request, response: Trigger.Response
+    ) -> Trigger.Response:
+        """
+        Service callback for set home location request.
+
+        Args:
+            request: Trigger.Request
+            response: Trigger.Response with success and message fields
+
+        Returns:
+            response: Trigger.Response
+        """
+        try:
+            self.get_logger().info("Set home service called")
+            self.set_home_location()
+
+            response.success = True
+            response.message = "Home location set to current position."
+            self.get_logger().info(response.message)
+
+        except Exception as e:
+            response.success = False
+            response.message = f"Set home failed: {str(e)}"
+            self.get_logger().error(response.message)
+
+        return response
+
+    def rtl_callback(
+        self, request: Trigger.Request, response: Trigger.Response
+    ) -> Trigger.Response:
+        """
+        Service callback for return to launch request.
+
+        Args:
+            request: Trigger.Request
+            response: Trigger.Response with success and message fields
+
+        Returns:
+            response: Trigger.Response
+        """
+        try:
+            self.get_logger().info("RTL service called")
+            self.rtl()
+
+            response.success = True
+            response.message = "RTL command sent."
+            self.get_logger().info(response.message)
+
+        except Exception as e:
+            response.success = False
+            response.message = f"RTL failed: {str(e)}"
             self.get_logger().error(response.message)
 
         return response

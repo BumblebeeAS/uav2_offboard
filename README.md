@@ -12,27 +12,43 @@ Offboard package for drone behaviors and missions.
 ros2 launch uav2_offboard launch.py
 ```
 
-2. Takeoff
+2. Set home
+
+```bash
+ros2 service call /uav2/offboard_node/set_home std_srvs/srv/Trigger "{}"
+```
+
+3. Takeoff
 
 ```bash
 ros2 action send_goal /uav2/offboard_node/takeoff bb_uav_msgs/action/Takeoff "{altitude: 3.0, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
 ```
 
-3. Move
+4. Move
 
 ```bash
 ros2 action send_goal /uav2/offboard_node/go_to_position bb_uav_msgs/action/GoToPosition "{x: 3.0, y: 3.0, z: -2.0, relative: false, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
 ```
 
-4. Land
+5. Land / return to launch
+
+Land:
 
 ```bash
 ros2 service call /uav2/offboard_node/land std_srvs/srv/Trigger "{}"
 ```
 
+Return to launch:
+
+```bash
+ros2 service call /uav2/offboard_node/rtl std_srvs/srv/Trigger "{}"
+```
+
 ## Usage
 
 The vehicle can be in any mode for the `Takeoff` action but it must be armed and in "Offboard" flight mode for the `GoToPosition` action.
+
+Note that, by default, "Return to Launch" (RTL) returns the UAV to its **takeoff position** (not the position where the PX4 Flight Controller is turned on). This return position can be overridden by the `set_home` action.
 
 ## How It Works
 
