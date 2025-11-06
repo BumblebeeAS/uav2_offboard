@@ -106,7 +106,6 @@ class LandingTargetPoseNode(Node):
             msg.vx_rel = 0.0
             msg.vy_rel = 0.0
 
-            # Absolute position (not used in this case)
             # TODO: Subscribe to home position topic and fill these fields accordingly
             msg.x_abs = 0.0
             msg.y_abs = 0.0
