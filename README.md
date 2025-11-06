@@ -30,12 +30,18 @@ ros2 action send_goal /uav2/offboard_node/takeoff bb_uav_msgs/action/Takeoff "{a
 ros2 action send_goal /uav2/offboard_node/go_to_position bb_uav_msgs/action/GoToPosition "{x: 3.0, y: 3.0, z: -2.0, relative: false, x_threshold: 0.1, y_threshold: 0.1, z_threshold: 0.1}" --feedback
 ```
 
-5. Land / return to launch
+5. Land / precision land / return to launch
 
 Land:
 
 ```bash
 ros2 service call /uav2/offboard_node/land std_srvs/srv/Trigger "{}"
+```
+
+Precision land:
+
+```bash
+ros2 service call /uav2/offboard_node/precision_landing std_srvs/srv/Trigger "{}"
 ```
 
 Return to launch:

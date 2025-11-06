@@ -9,12 +9,6 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import (
-    QoSDurabilityPolicy,
-    QoSHistoryPolicy,
-    QoSProfile,
-    QoSReliabilityPolicy,
-)
 from std_srvs.srv import Trigger
 
 from px4_msgs.msg import (
@@ -25,27 +19,14 @@ from px4_msgs.msg import (
     VehicleStatus,
 )
 from uav2_offboard.utils.goto import GeneralGoal
+from uav2_offboard.utils.qos_profiles import QOS_PROFILE_PUB, QOS_PROFILE_SUB
 
 
-class GoToPositionActionServer(Node):
-    """Action server for navigating to a target position with PX4 offboard control"""
+class OffboardNode(Node):
+    """ROS node to interface with PX4 offboard control via action servers and services."""
 
     def __init__(self):
-        super().__init__("go_to_position_action_server")
-
-        # QoS profiles
-        qos_profile_pub = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1,
-        )
-        qos_profile_sub = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            durability=QoSDurabilityPolicy.VOLATILE,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1,
-        )
+        super().__init__("offboard_node")
 
         # Parameters
         vehicle_status_topic = (
@@ -88,24 +69,24 @@ class GoToPositionActionServer(Node):
             VehicleStatus,
             vehicle_status_topic,
             self.vehicle_status_callback,
-            qos_profile_sub,
+            QOS_PROFILE_SUB,
         )
         self.local_pos_sub = self.create_subscription(
             VehicleLocalPosition,
             vehicle_local_position_topic,
             self.local_position_callback,
-            qos_profile_sub,
+            QOS_PROFILE_SUB,
         )
 
         # Publishers
         self.publisher_offboard_mode = self.create_publisher(
-            OffboardControlMode, offboard_control_mode_topic, qos_profile_pub
+            OffboardControlMode, offboard_control_mode_topic, QOS_PROFILE_PUB
         )
         self.publisher_trajectory = self.create_publisher(
-            TrajectorySetpoint, trajectory_setpoint_topic, qos_profile_pub
+            TrajectorySetpoint, trajectory_setpoint_topic, QOS_PROFILE_PUB
         )
         self.publisher_vehicle_command = self.create_publisher(
-            VehicleCommand, vehicle_command_topic, qos_profile_pub
+            VehicleCommand, vehicle_command_topic, QOS_PROFILE_PUB
         )
 
         # Continuously publish heartbeat and traj setpoint.
@@ -128,6 +109,9 @@ class GoToPositionActionServer(Node):
             Trigger, "~/set_home", self.set_home_callback
         )
         self.rtl_service_ = self.create_service(Trigger, "~/rtl", self.rtl_callback)
+        self.prec_landing_service_ = self.create_service(
+            Trigger, "~/precision_landing", self.precision_landing_callback
+        )
 
         # Action servers
         self._goto_position_action_server = ActionServer(
@@ -155,7 +139,7 @@ class GoToPositionActionServer(Node):
         self.start_time = None
         self.absolute_target = None  # Stores the computed absolute target position
 
-        self.get_logger().info("GoToPosition action server started")
+        self.get_logger().info("OffboardNode started")
 
     # -------------------- Vehicle Command Helpers --------------------
 
@@ -347,6 +331,34 @@ class GoToPositionActionServer(Node):
 
         return response
 
+    def precision_landing_callback(
+        self, request: Trigger.Request, response: Trigger.Response
+    ) -> Trigger.Response:
+        """
+        Service callback for precision landing request.
+
+        Args:
+            request: Trigger.Request
+            response: Trigger.Response with success and message fields
+
+        Returns:
+            response: Trigger.Response
+        """
+        try:
+            self.get_logger().info("Precision landing service called")
+            self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_PRECLAND)
+
+            response.success = True
+            response.message = "Precision landing command sent."
+            self.get_logger().info(response.message)
+
+        except Exception as e:
+            response.success = False
+            response.message = f"Precision landing failed: {str(e)}"
+            self.get_logger().error(response.message)
+
+        return response
+
     # -------------------- Action Server Callbacks --------------------
 
     def validate_goal(self, goal: GeneralGoal) -> bool:
@@ -400,6 +412,7 @@ class GoToPositionActionServer(Node):
 
         if not self.position_valid:
             self.get_logger().error("Failed to get valid position data")
+            self.current_goal = None
             goal_handle.abort()
             result = GoToResult()
             result.success = False
@@ -521,15 +534,15 @@ class GoToPositionActionServer(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    action_server = GoToPositionActionServer()
+    offboard_node = OffboardNode()
     executor = MultiThreadedExecutor()
-    executor.add_node(action_server)
+    executor.add_node(offboard_node)
     try:
         executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
-        action_server.destroy_node()
+        offboard_node.destroy_node()
         executor.shutdown()
         rclpy.try_shutdown()
 
