@@ -52,9 +52,22 @@ ros2 service call /uav2/offboard_node/rtl std_srvs/srv/Trigger "{}"
 
 ## Usage
 
+### Takeoff
+
 The vehicle can be in any mode for the `Takeoff` action but it must be armed and in "Offboard" flight mode for the `GoToPosition` action.
 
+### Landing
+
 Note that, by default, "Return to Launch" (RTL) returns the UAV to its **takeoff position** (not the position where the PX4 Flight Controller is turned on). This return position can be overridden by the `set_home` action.
+
+For "Precision Landing" to work, add the following to `src/modules/uxrce_dds_client/dds_topics.yaml` in the `PX4-Autopilot` directory:
+
+```yaml
+- topic: /fmu/in/landing_target_pose
+  type: px4_msgs::msg::LandingTargetPose
+```
+
+For sim, just run the `make` command again. For the real thing, you will need to flash the PX4 firmware.
 
 ## How It Works
 
