@@ -32,6 +32,7 @@ setup(
         "console_scripts": [
             "offboard_node = uav2_offboard.offboard_node:main",
             "landing_target_pose_node = uav2_offboard.landing_target_pose_node:main",
+            "imu_repub = uav2_offboard.imu_repub:main",
         ],
     },
 )
