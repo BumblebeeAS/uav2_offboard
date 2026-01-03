@@ -5,6 +5,8 @@ import numpy as np
 import rclpy
 from bb_uav_msgs.action import GoToPosition, Takeoff
 from bb_uav_msgs.msg import GoToFeedback, GoToResult
+from bb_uav_msgs.srv import ChangeOffboardControlMode
+from geometry_msgs.msg import Vector3
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -19,6 +21,7 @@ from px4_msgs.msg import (
     VehicleStatus,
 )
 from uav2_offboard.utils.goto import GeneralGoal
+from uav2_offboard.utils.offboard_mode import OffboardMode
 from uav2_offboard.utils.qos_profiles import QOS_PROFILE_PUB, QOS_PROFILE_SUB
 
 
@@ -60,6 +63,13 @@ class OffboardNode(Node):
             .get_parameter_value()
             .string_value
         )
+        acceleration_control_topic = (
+            self.declare_parameter(
+                "acceleration_control_topic", "/uav2/acceleration_control"
+            )
+            .get_parameter_value()
+            .string_value
+        )
 
         # Create callback group for concurrent execution
         self.callback_group = ReentrantCallbackGroup()
@@ -75,6 +85,12 @@ class OffboardNode(Node):
             VehicleLocalPosition,
             vehicle_local_position_topic,
             self.local_position_callback,
+            QOS_PROFILE_SUB,
+        )
+        self.acceleration_sub = self.create_subscription(
+            Vector3,
+            acceleration_control_topic,
+            self.acceleration_callback,
             QOS_PROFILE_SUB,
         )
 
@@ -102,6 +118,7 @@ class OffboardNode(Node):
         self.arming_state = VehicleStatus.ARMING_STATE_DISARMED
         self.current_position = np.array([0.0, 0.0, 0.0])
         self.position_valid = False
+        self.offboard_mode = OffboardMode()
 
         # Service servers
         self.land_service_ = self.create_service(Trigger, "~/land", self.land_callback)
@@ -111,6 +128,11 @@ class OffboardNode(Node):
         self.rtl_service_ = self.create_service(Trigger, "~/rtl", self.rtl_callback)
         self.prec_landing_service_ = self.create_service(
             Trigger, "~/precision_landing", self.precision_landing_callback
+        )
+        self.change_offboard_mode_service_ = self.create_service(
+            ChangeOffboardControlMode,
+            "~/change_offboard_mode",
+            self.change_offboard_mode_callback,
         )
 
         # Action servers
@@ -138,6 +160,7 @@ class OffboardNode(Node):
         self.goal_handle = None
         self.start_time = None
         self.absolute_target = None  # Stores the computed absolute target position
+        self.latest_acceleration_msg = Vector3(x=0.0, y=0.0, z=0.0)
 
         self.get_logger().info("OffboardNode started")
 
@@ -215,35 +238,68 @@ class OffboardNode(Node):
         self.current_position = np.array([msg.x, msg.y, msg.z])
         self.position_valid = True
 
+    def acceleration_callback(self, msg: Vector3):
+        """Update latest acceleration command from topic"""
+        self.latest_acceleration_msg = msg
+
     def control_loop_callback(self):
         """High-rate control loop for publishing offboard commands"""
         # Always publish offboard control mode to keep the connection alive
         offboard_msg = OffboardControlMode()
-        offboard_msg.position = True
-        offboard_msg.velocity = False
-        offboard_msg.acceleration = False
-        offboard_msg.attitude = False
-        offboard_msg.body_rate = False
-        offboard_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        current_mode = self.offboard_mode.get_mode()
+        offboard_msg.position = current_mode["position"]
+        offboard_msg.velocity = current_mode["velocity"]
+        offboard_msg.acceleration = current_mode["acceleration"]
+        offboard_msg.attitude = current_mode["attitude"]
+        offboard_msg.body_rate = current_mode["body_rate"]
+        offboard_msg.thrust_and_torque = current_mode["thrust_and_torque"]
+        offboard_msg.direct_actuator = current_mode["direct_actuator"]
 
+        offboard_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.publisher_offboard_mode.publish(offboard_msg)
 
-        # Only publish trajectory if we have an active goal and vehicle is in offboard mode
         if (
-            self.current_goal is not None
-            and self.absolute_target is not None
-            and (
-                self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
-                and self.arming_state == VehicleStatus.ARMING_STATE_ARMED
-            )
+            self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
+            and self.arming_state == VehicleStatus.ARMING_STATE_ARMED
         ):
-            trajectory_msg = TrajectorySetpoint()
-            trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
-            trajectory_msg.position[0] = self.absolute_target[0]
-            trajectory_msg.position[1] = self.absolute_target[1]
-            trajectory_msg.position[2] = self.absolute_target[2]
-            trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
-            self.publisher_trajectory.publish(trajectory_msg)
+            if (
+                self.current_goal is not None
+                and self.absolute_target is not None
+                and self.offboard_mode.is_position
+            ):
+                self.publish_trajectory_setpoint()
+
+            if self.offboard_mode.is_acceleration:
+                self.publish_acceleration_setpoint()
+
+    def publish_trajectory_setpoint(self):
+        """Publish trajectory setpoint if we have an active goal and vehicle is in offboard mode"""
+        trajectory_msg = TrajectorySetpoint()
+        trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        trajectory_msg.position[0] = self.absolute_target[0]
+        trajectory_msg.position[1] = self.absolute_target[1]
+        trajectory_msg.position[2] = self.absolute_target[2]
+        trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
+        self.publisher_trajectory.publish(trajectory_msg)
+
+    def publish_acceleration_setpoint(self):
+        """Publish acceleration setpoint if we have an active goal and vehicle is in offboard mode"""
+        trajectory_msg = TrajectorySetpoint()
+        trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+
+        trajectory_msg.position[0] = float("nan")
+        trajectory_msg.position[1] = float("nan")
+        trajectory_msg.position[2] = float("nan")
+
+        trajectory_msg.velocity[0] = float("nan")
+        trajectory_msg.velocity[1] = float("nan")
+        trajectory_msg.velocity[2] = float("nan")
+
+        trajectory_msg.acceleration[0] = self.latest_acceleration_msg.x
+        trajectory_msg.acceleration[1] = self.latest_acceleration_msg.y
+        trajectory_msg.acceleration[2] = self.latest_acceleration_msg.z
+        trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
+        self.publisher_trajectory.publish(trajectory_msg)
 
     # -------------------- Service Callbacks --------------------
 
@@ -356,6 +412,39 @@ class OffboardNode(Node):
             response.success = False
             response.message = f"Precision landing failed: {str(e)}"
             self.get_logger().error(response.message)
+
+        return response
+
+    def change_offboard_mode_callback(
+        self,
+        request: ChangeOffboardControlMode.Request,
+        response: ChangeOffboardControlMode.Response,
+    ) -> ChangeOffboardControlMode.Response:
+        """
+        Service callback for changing offboard control mode.
+
+        Args:
+            request: ChangeOffboardControlMode.Request
+            response: ChangeOffboardControlMode.Response
+        Returns:
+            response: ChangeOffboardControlMode.Response
+        """
+        try:
+            self.get_logger().info("Change offboard mode service called")
+            self.offboard_mode.set_mode(
+                request.position,
+                request.velocity,
+                request.acceleration,
+                request.attitude,
+                request.body_rate,
+                request.thrust_and_torque,
+                request.direct_actuator,
+            )
+            response.success = True
+
+        except Exception as e:
+            response.success = False
+            self.get_logger().error(f"Failed to change offboard mode: {str(e)}")
 
         return response
 
