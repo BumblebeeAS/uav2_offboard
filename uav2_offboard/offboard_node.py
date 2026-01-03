@@ -273,7 +273,7 @@ class OffboardNode(Node):
                 self.publish_acceleration_setpoint()
 
     def publish_trajectory_setpoint(self):
-        """Publish trajectory setpoint if we have an active goal and vehicle is in offboard mode"""
+        """Publish trajectory setpoint"""
         trajectory_msg = TrajectorySetpoint()
         trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         trajectory_msg.position[0] = self.absolute_target[0]
@@ -283,7 +283,7 @@ class OffboardNode(Node):
         self.publisher_trajectory.publish(trajectory_msg)
 
     def publish_acceleration_setpoint(self):
-        """Publish acceleration setpoint if we have an active goal and vehicle is in offboard mode"""
+        """Publish acceleration setpoint"""
         trajectory_msg = TrajectorySetpoint()
         trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
 
