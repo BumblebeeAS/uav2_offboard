@@ -9,6 +9,7 @@ from bb_uav_msgs.srv import ChangeOffboardControlMode
 from geometry_msgs.msg import Vector3
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_srvs.srv import Trigger
@@ -241,6 +242,7 @@ class OffboardNode(Node):
     def acceleration_callback(self, msg: Vector3):
         """Update latest acceleration command from topic"""
         self.latest_acceleration_msg = msg
+        self.latest_acceleration_msg_time = self.get_clock().now()
 
     def control_loop_callback(self):
         """High-rate control loop for publishing offboard commands"""
@@ -269,7 +271,11 @@ class OffboardNode(Node):
             ):
                 self.publish_trajectory_setpoint()
 
-            if self.offboard_mode.is_acceleration:
+            if (
+                self.offboard_mode.is_acceleration
+                and self.get_clock().now() - self.latest_acceleration_msg_time
+                < Duration(seconds=2)
+            ):
                 self.publish_acceleration_setpoint()
 
     def publish_trajectory_setpoint(self):
