@@ -1,48 +1,68 @@
-import rclpy
-from rclpy.node import Node
+from operator import attrgetter
 
-from px4_msgs.msg import VehicleOdometry
+import rclpy
+from geometry_msgs.msg import Vector3
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
 from sensor_msgs.msg import Imu
+
 from uav2_offboard.utils.qos_profiles import QOS_PROFILE_SUB
 
 
 class ImuRepubNode(Node):
 
     def __init__(self):
-        super().__init__('imu_repub')
+        super().__init__("imu_repub")
 
         self.sub = self.create_subscription(
-            VehicleOdometry,
-            '/fmu/out/vehicle_odometry',
-            self.callback,
-            QOS_PROFILE_SUB
+            Odometry, "/uav2/odom_ned", self.callback, QOS_PROFILE_SUB
         )
 
-        self.pub = self.create_publisher(
-            Imu,
-            '/imu',
-            10
-        )
+        self.pub = self.create_publisher(Imu, "/imu", 10)
+        self.prev_velocity = None
+        self.prev_time = None
 
-    def callback(self, msg: VehicleOdometry):
+    def callback(self, msg: Odometry):
         imu = Imu()
-        imu.header.stamp = self.get_clock().now().to_msg()
-        imu.header.frame_id = "uav2/base_link_frd"
+        imu.header.stamp = msg.header.stamp
+        imu.header.frame_id = msg.child_frame_id
 
-        imu.orientation.w = msg.q[0]
-        imu.orientation.x = msg.q[1]
-        imu.orientation.y = msg.q[2]
-        imu.orientation.z = msg.q[3]
+        v_x, v_y, v_z = attrgetter("x", "y", "z")(msg.twist.twist.linear)
+        if self.prev_time is not None and self.prev_velocity is not None:
+            dv_x = v_x - self.prev_velocity.x
+            dv_y = v_y - self.prev_velocity.y
+            dv_z = v_z - self.prev_velocity.z
 
-        imu.angular_velocity.x = msg.angular_velocity[0]
-        imu.angular_velocity.y = msg.angular_velocity[1]
-        imu.angular_velocity.z = msg.angular_velocity[2]
+            dt = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9 - self.prev_time
+            imu.linear_acceleration = self.compute_linear_accel(dv_x, dv_y, dv_z, dt)
 
-        imu.linear_acceleration.x =  msg.acceleration[0]
-        imu.linear_acceleration.y = msg.acceleration[1]
-        imu.linear_acceleration.z = msg.acceleration[2]
+        imu.orientation = msg.pose.pose.orientation
+
+        imu.angular_velocity = msg.twist.twist.angular
+
+        imu.linear_acceleration.x = 0.0
+        imu.linear_acceleration.y = 0.0
+        imu.linear_acceleration.z = 0.0
+
+        imu.orientation_covariance[0] = -1.0
+        imu.angular_velocity_covariance[0] = -1.0
+        imu.linear_acceleration_covariance[0] = -1.0
+
+        self.prev_time = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
+        self.prev_velocity = Vector3()
+        self.prev_velocity.x = v_x
+        self.prev_velocity.y = v_y
+        self.prev_velocity.z = v_z
 
         self.pub.publish(imu)
+
+    def compute_linear_accel(self, dx, dy, dz, dt):
+        linear_accel = Vector3()
+
+        linear_accel.x = dx / dt
+        linear_accel.y = dy / dt
+        linear_accel.z = dz / dt
+        return linear_accel
 
 
 def main():
@@ -53,5 +73,5 @@ def main():
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
