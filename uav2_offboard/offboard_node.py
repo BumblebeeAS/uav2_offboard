@@ -604,7 +604,7 @@ class OffboardNode(Node):
         )
         return Takeoff.Result(result=goto_result)
 
-    async def execute_land_callback(self, goal_handle) -> GoToResult:
+    async def execute_land_callback(self, goal_handle) -> Land.Result:
         self.is_goal_active = True
 
         # check landed at a rate of 10hz
@@ -625,7 +625,7 @@ class OffboardNode(Node):
                 )
                 self.destroy_rate(rate)
                 self.reset_internal_state()
-                return result
+                return Land.Result(result=result)
 
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
@@ -635,26 +635,15 @@ class OffboardNode(Node):
                 self.get_logger().info("Land action canceled")
                 self.reset_internal_state()
                 self.destroy_rate(rate)
-                return result
+                return Land.Result(result=result)
 
-            if self.nav_state != VehicleStatus.NAVIGATION_STATE_AUTO_LAND:
-                goal_handle.abort()
-                self.get_logger().warning(
-                    "Vehicle exited land mode; aborting land action"
-                )
-                result = GoToResult()
-                result.success = False
-                result.message = "Vehicle exited land mode"
-                self.reset_internal_state()
-                self.destroy_rate(rate)
-                return result
-
+            # TODO: add a check for exit land mode currently switch to hold before disarming when landed need figure out how to deal with that
             feedback_msg = GoToFeedback()
             feedback_msg.current_x = self.current_position[0]
             feedback_msg.current_y = self.current_position[1]
             feedback_msg.current_z = self.current_position[2]
             feedback_msg.distance_to_goal = -self.current_position[2]
-            goal_handle.publish_feedback(feedback_msg)
+            goal_handle.publish_feedback(Land.Feedback(feedback=feedback_msg))
 
             # rely on px4 land detector to disarm to indicate landed
             if self.arming_state == VehicleStatus.ARMING_STATE_DISARMED:
@@ -669,12 +658,12 @@ class OffboardNode(Node):
                 self.get_logger().info("Landed successfully")
                 self.reset_internal_state()
                 self.destroy_rate(rate)
-                return result
+                return Land.Result(result=result)
 
             rate.sleep()
 
         self.destroy_rate(rate)
-        return GoToResult()  # SHOULD NOT REACH HERE
+        return Land.Result()  # SHOULD NOT REACH HERE
 
     def reset_internal_state(self):
         """Reset internal state variables"""
