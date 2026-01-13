@@ -28,7 +28,23 @@ class OffboardMode:
     ) -> None:
         """
         Set the offboard control mode.
+
+        Raises:
+            ValueError: If not exactly one control mode is set to True.
         """
+        num_set = (
+            position
+            + velocity
+            + acceleration
+            + attitude
+            + body_rate
+            + thrust_and_torque
+            + direct_actuator
+        )
+
+        if num_set != 1:
+            raise ValueError("Exactly one control mode must be set to True.")
+
         self.is_position = position
         self.is_velocity = velocity
         self.is_acceleration = acceleration

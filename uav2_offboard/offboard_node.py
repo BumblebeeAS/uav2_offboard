@@ -3,13 +3,12 @@ from typing import Callable
 
 import numpy as np
 import rclpy
-from bb_uav_msgs.action import GoToPosition, Takeoff
+from bb_uav_msgs.action import GoToPosition, Land, Takeoff
 from bb_uav_msgs.msg import GoToFeedback, GoToResult
 from bb_uav_msgs.srv import ChangeOffboardControlMode
 from geometry_msgs.msg import Vector3
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_srvs.srv import Trigger
@@ -21,7 +20,7 @@ from px4_msgs.msg import (
     VehicleLocalPosition,
     VehicleStatus,
 )
-from uav2_offboard.utils.goto import GeneralGoal
+from uav2_offboard.utils.goto import GeneralGoal, is_acceleration_valid
 from uav2_offboard.utils.offboard_mode import OffboardMode
 from uav2_offboard.utils.qos_profiles import QOS_PROFILE_PUB, QOS_PROFILE_SUB
 
@@ -122,7 +121,6 @@ class OffboardNode(Node):
         self.offboard_mode = OffboardMode()
 
         # Service servers
-        self.land_service_ = self.create_service(Trigger, "~/land", self.land_callback)
         self.set_home_service_ = self.create_service(
             Trigger, "~/set_home", self.set_home_callback
         )
@@ -155,13 +153,20 @@ class OffboardNode(Node):
             cancel_callback=self.cancel_callback,
             callback_group=self.callback_group,
         )
+        self._land_action_server = ActionServer(
+            self,
+            Land,
+            "~/land",
+            execute_callback=self.execute_land_callback,
+            goal_callback=self.land_goal_callback,
+            cancel_callback=self.cancel_callback,
+            callback_group=self.callback_group,
+        )
 
         # Goal tracking
-        self.current_goal = None
-        self.goal_handle = None
-        self.start_time = None
         self.absolute_target = None  # Stores the computed absolute target position
         self.latest_acceleration_msg = Vector3(x=0.0, y=0.0, z=0.0)
+        self.is_goal_active = False
 
         self.get_logger().info("OffboardNode started")
 
@@ -265,21 +270,20 @@ class OffboardNode(Node):
             and self.arming_state == VehicleStatus.ARMING_STATE_ARMED
         ):
             if (
-                self.current_goal is not None
+                self.is_goal_active
                 and self.absolute_target is not None
                 and self.offboard_mode.is_position
             ):
                 self.publish_trajectory_setpoint()
 
-            if (
-                self.offboard_mode.is_acceleration
-                and self.get_clock().now() - self.latest_acceleration_msg_time
-                < Duration(seconds=2)
+            if self.offboard_mode.is_acceleration and is_acceleration_valid(
+                self.get_clock().now(), self.latest_acceleration_msg_time, 1.0
             ):
                 self.publish_acceleration_setpoint()
 
     def publish_trajectory_setpoint(self):
         """Publish trajectory setpoint"""
+        assert self.absolute_target is not None
         trajectory_msg = TrajectorySetpoint()
         trajectory_msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         trajectory_msg.position[0] = self.absolute_target[0]
@@ -308,34 +312,6 @@ class OffboardNode(Node):
         self.publisher_trajectory.publish(trajectory_msg)
 
     # -------------------- Service Callbacks --------------------
-
-    def land_callback(
-        self, request: Trigger.Request, response: Trigger.Response
-    ) -> Trigger.Response:
-        """
-        Service callback for land request.
-
-        Args:
-            request: Trigger.Request
-            response: Trigger.Response with success and message fields
-
-        Returns:
-            response: Trigger.Response
-        """
-        try:
-            self.get_logger().info(f"Land service called")
-            self.engage_land_mode()
-
-            response.success = True
-            response.message = f"Land command sent."
-            self.get_logger().info(response.message)
-
-        except Exception as e:
-            response.success = False
-            response.message = f"Land failed: {str(e)}"
-            self.get_logger().error(response.message)
-
-        return response
 
     def set_home_callback(
         self, request: Trigger.Request, response: Trigger.Response
@@ -461,7 +437,7 @@ class OffboardNode(Node):
             self.get_logger().warn("Invalid thresholds, must be positive")
             return False
 
-        if self.current_goal is not None:
+        if self.is_goal_active:
             self.get_logger().warn("Another goal is in progress; rejecting...")
             return False
 
@@ -490,6 +466,16 @@ class OffboardNode(Node):
         is_valid_goal = self.validate_goal(GeneralGoal.from_takeoff_goal(goal_request))
         return GoalResponse.ACCEPT if is_valid_goal else GoalResponse.REJECT
 
+    def land_goal_callback(self, goal_request: Takeoff.Goal):
+        """Accept or reject a Land goal (using Takeoff action type)"""
+        self.get_logger().info("Received land request")
+
+        if self.is_goal_active:
+            self.get_logger().warn("Another goal is in progress; rejecting...")
+            return GoalResponse.REJECT
+
+        return GoalResponse.ACCEPT
+
     def cancel_callback(self, goal_handle):
         """Accept or reject a client request to cancel an action"""
         self.get_logger().info("Received cancel request")
@@ -502,34 +488,30 @@ class OffboardNode(Node):
         publish_feedback_fn: Callable[[GoToFeedback], None],
     ) -> GoToResult:
         """Execute the goal"""
-        self.current_goal = goal
-        self.start_time = self.get_clock().now()
+        self.is_goal_active = True
+        start_time = self.get_clock().now()
 
         if not self.position_valid:
             self.get_logger().error("Failed to get valid position data")
-            self.current_goal = None
+            self.reset_internal_state()
             goal_handle.abort()
             result = GoToResult()
             result.success = False
             result.message = "Failed to get valid position data"
             return result
 
-        self.goal_handle = goal_handle
-
         # Compute absolute target position from relative or absolute goal
-        if self.current_goal.relative:
+        if goal.relative:
             self.absolute_target = self.current_position + np.array(
-                [self.current_goal.x, self.current_goal.y, self.current_goal.z]
+                [goal.x, goal.y, goal.z]
             )
             self.get_logger().info(
                 f"Relative mode: current=({self.current_position[0]:.2f}, {self.current_position[1]:.2f}, {self.current_position[2]:.2f}), "
-                f"offset=({self.current_goal.x:.2f}, {self.current_goal.y:.2f}, {self.current_goal.z:.2f}), "
+                f"offset=({goal.x:.2f}, {goal.y:.2f}, {goal.z:.2f}), "
                 f"absolute_target=({self.absolute_target[0]:.2f}, {self.absolute_target[1]:.2f}, {self.absolute_target[2]:.2f})"
             )
         else:
-            self.absolute_target = np.array(
-                [self.current_goal.x, self.current_goal.y, self.current_goal.z]
-            )
+            self.absolute_target = np.array([goal.x, goal.y, goal.z])
             self.get_logger().info(
                 f"Absolute mode: target=({self.absolute_target[0]:.2f}, {self.absolute_target[1]:.2f}, {self.absolute_target[2]:.2f})"
             )
@@ -537,6 +519,8 @@ class OffboardNode(Node):
         rate = self.create_rate(20)
 
         while rclpy.ok():
+            # Calculate time elapsed
+            time_elapsed = (self.get_clock().now() - start_time).nanoseconds / 1e9
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
                 result = GoToResult()
@@ -544,14 +528,9 @@ class OffboardNode(Node):
                 result.final_x = self.current_position[0]
                 result.final_y = self.current_position[1]
                 result.final_z = self.current_position[2]
-                result.time_elapsed = (
-                    self.get_clock().now() - self.start_time
-                ).nanoseconds / 1e9
                 result.message = "Goal canceled"
                 self.get_logger().info("Goal canceled")
-                self.current_goal = None
-                self.goal_handle = None
-                self.absolute_target = None
+                self.reset_internal_state()
                 self.destroy_rate(rate)
                 return result
 
@@ -564,9 +543,6 @@ class OffboardNode(Node):
             y_error = abs(distance_vector[1])
             z_error = abs(distance_vector[2])
 
-            # Calculate time elapsed
-            time_elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
-
             # Publish feedback
             feedback_msg = GoToFeedback()
             feedback_msg.current_x = self.current_position[0]
@@ -577,11 +553,10 @@ class OffboardNode(Node):
 
             # Check if goal is reached
             if (
-                x_error <= self.current_goal.x_threshold
-                and y_error <= self.current_goal.y_threshold
-                and z_error <= self.current_goal.z_threshold
+                x_error <= goal.x_threshold
+                and y_error <= goal.y_threshold
+                and z_error <= goal.z_threshold
             ):
-
                 goal_handle.succeed()
                 result = GoToResult()
                 result.success = True
@@ -593,23 +568,25 @@ class OffboardNode(Node):
                 self.get_logger().info(
                     f"Goal reached! Final position: ({result.final_x:.2f}, {result.final_y:.2f}, {result.final_z:.2f})"
                 )
-                self.current_goal = None
-                self.goal_handle = None
-                self.absolute_target = None
+                self.reset_internal_state()
                 self.destroy_rate(rate)
                 return result
 
             # Continue commanding position in control_loop_callback
             rate.sleep()
 
+        self.destroy_rate(rate)
+        return GoToResult()  # SHOULD NOT REACH HERE
+
     async def execute_goto_position_callback(self, goal_handle) -> GoToPosition.Result:
         """Execute GoToPosition action"""
         general_goal = GeneralGoal.from_position_goal(goal_handle.request)
-        publish_feedback_fn = lambda feedback: goal_handle.publish_feedback(
-            GoToPosition.Feedback(feedback=feedback)
-        )
         goto_result = await self.execute_callback(
-            goal_handle, general_goal, publish_feedback_fn=publish_feedback_fn
+            goal_handle,
+            general_goal,
+            publish_feedback_fn=lambda feedback: goal_handle.publish_feedback(
+                GoToPosition.Feedback(feedback=feedback)
+            ),
         )
         return GoToPosition.Result(result=goto_result)
 
@@ -618,13 +595,91 @@ class OffboardNode(Node):
         self.arm()
         self.engage_offboard_mode()
         general_goal = GeneralGoal.from_takeoff_goal(goal_handle.request)
-        publish_feedback_fn = lambda feedback: goal_handle.publish_feedback(
-            Takeoff.Feedback(feedback=feedback)
-        )
         goto_result = await self.execute_callback(
-            goal_handle, general_goal, publish_feedback_fn=publish_feedback_fn
+            goal_handle,
+            general_goal,
+            publish_feedback_fn=lambda feedback: goal_handle.publish_feedback(
+                Takeoff.Feedback(feedback=feedback)
+            ),
         )
         return Takeoff.Result(result=goto_result)
+
+    async def execute_land_callback(self, goal_handle) -> GoToResult:
+        self.is_goal_active = True
+
+        # check landed at a rate of 10hz
+        rate = self.create_rate(10)
+        start_time = self.get_clock().now()
+        max_timeout = goal_handle.request.timeout
+
+        self.engage_land_mode()
+        while rclpy.ok():
+            time_elapsed = (self.get_clock().now() - start_time).nanoseconds / 1e9
+            if time_elapsed > max_timeout:
+                goal_handle.abort()
+                result = GoToResult()
+                result.success = False
+                result.message = "Land action timed out"
+                self.get_logger().info(
+                    f"Land action timed out time elapsed: {time_elapsed: .3f} seconds"
+                )
+                self.destroy_rate(rate)
+                self.reset_internal_state()
+                return result
+
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                result = GoToResult()
+                result.success = False
+                result.message = "Land action canceled"
+                self.get_logger().info("Land action canceled")
+                self.reset_internal_state()
+                self.destroy_rate(rate)
+                return result
+
+            if self.nav_state != VehicleStatus.NAVIGATION_STATE_AUTO_LAND:
+                goal_handle.abort()
+                self.get_logger().warning(
+                    "Vehicle exited land mode; aborting land action"
+                )
+                result = GoToResult()
+                result.success = False
+                result.message = "Vehicle exited land mode"
+                self.reset_internal_state()
+                self.destroy_rate(rate)
+                return result
+
+            feedback_msg = GoToFeedback()
+            feedback_msg.current_x = self.current_position[0]
+            feedback_msg.current_y = self.current_position[1]
+            feedback_msg.current_z = self.current_position[2]
+            feedback_msg.distance_to_goal = -self.current_position[2]
+            goal_handle.publish_feedback(feedback_msg)
+
+            # rely on px4 land detector to disarm to indicate landed
+            if self.arming_state == VehicleStatus.ARMING_STATE_DISARMED:
+                goal_handle.succeed()
+                result = GoToResult()
+                result.success = True
+                result.message = "Landed successfully"
+                result.final_x = self.current_position[0]
+                result.final_y = self.current_position[1]
+                result.final_z = self.current_position[2]
+                result.time_elapsed = time_elapsed
+                self.get_logger().info("Landed successfully")
+                self.reset_internal_state()
+                self.destroy_rate(rate)
+                return result
+
+            rate.sleep()
+
+        self.destroy_rate(rate)
+        return GoToResult()  # SHOULD NOT REACH HERE
+
+    def reset_internal_state(self):
+        """Reset internal state variables"""
+        self.absolute_target = None
+        self.is_goal_active = False
 
 
 def main(args=None):

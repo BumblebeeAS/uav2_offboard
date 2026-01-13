@@ -1,6 +1,15 @@
 from dataclasses import dataclass
 
 from bb_uav_msgs.action import GoToPosition, Takeoff
+from rclpy.time import Time
+
+
+def is_acceleration_valid(
+    curr_time: Time, last_accel_time: Time, accel_timeout_sec: float
+) -> bool:
+    """Check if the acceleration data is still valid based on timeout"""
+    time_diff = (curr_time - last_accel_time).nanoseconds / 1e9
+    return time_diff < accel_timeout_sec
 
 
 @dataclass
