@@ -617,8 +617,6 @@ class OffboardNode(Node):
         start_time_out_of_land_mode = None
 
         self.engage_land_mode()
-        # 1. check we enter land mode before anything else
-        # 2. check if land mode is exited -> if timeout hit before we checked disarm == landing failed
         while rclpy.ok():
             if (
                 self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND
@@ -651,19 +649,27 @@ class OffboardNode(Node):
                 self.destroy_rate(rate)
                 return Land.Result(result=result)
 
+            # to check if we exit land mode before landing is complete
+            # 1. check started land mode previously
+            # 2. check we are no longer in land mode
+            # 3. check we are not disarmed yet
+            # 4. check timeout exceeded
             if (
                 is_in_land_mode
                 and self.nav_state != VehicleStatus.NAVIGATION_STATE_AUTO_LAND
                 and self.arming_state != VehicleStatus.ARMING_STATE_DISARMED
-                and time_elapsed_out_of_land_mode > max_timeout_out_of_land_mode
             ):
-                if start_time_out_of_land_mode is None:
+                if start_time_out_of_land_mode is None:  # first time out of land mode
                     start_time_out_of_land_mode = self.get_clock().now()
 
+                # we start counting here if we exit land mode before disarm it means landing failed
                 time_elapsed_out_of_land_mode = (
                     self.get_clock().now() - start_time_out_of_land_mode
                 ).nanoseconds / 1e9
-                # we start counting here if we exit land mode before disarm it means landing failed
+
+                if time_elapsed_out_of_land_mode <= max_timeout_out_of_land_mode:
+                    continue
+
                 goal_handle.abort()
                 result = GoToResult()
                 result.success = False
