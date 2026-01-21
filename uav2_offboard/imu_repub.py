@@ -10,7 +10,6 @@ from uav2_offboard.utils.qos_profiles import QOS_PROFILE_SUB
 
 
 class ImuRepubNode(Node):
-
     def __init__(self):
         super().__init__("imu_repub")
 
@@ -23,26 +22,31 @@ class ImuRepubNode(Node):
         self.prev_time = None
 
     def callback(self, msg: Odometry):
+        if self.prev_time is None and self.prev_velocity is None:
+            self.prev_time = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
+            self.prev_velocity = Vector3()
+            self.prev_velocity.x = msg.twist.twist.linear.x
+            self.prev_velocity.y = msg.twist.twist.linear.y
+            self.prev_velocity.z = msg.twist.twist.linear.z
+            return
+        assert self.prev_time is not None
+        assert self.prev_velocity is not None
+
         imu = Imu()
         imu.header.stamp = msg.header.stamp
         imu.header.frame_id = msg.child_frame_id
 
         v_x, v_y, v_z = attrgetter("x", "y", "z")(msg.twist.twist.linear)
-        if self.prev_time is not None and self.prev_velocity is not None:
-            dv_x = v_x - self.prev_velocity.x
-            dv_y = v_y - self.prev_velocity.y
-            dv_z = v_z - self.prev_velocity.z
+        dv_x = v_x - self.prev_velocity.x
+        dv_y = v_y - self.prev_velocity.y
+        dv_z = v_z - self.prev_velocity.z
 
-            dt = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9 - self.prev_time
-            imu.linear_acceleration = self.compute_linear_accel(dv_x, dv_y, dv_z, dt)
+        dt = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9 - self.prev_time
+        imu.linear_acceleration = self.compute_linear_accel(dv_x, dv_y, dv_z, dt)
 
         imu.orientation = msg.pose.pose.orientation
 
         imu.angular_velocity = msg.twist.twist.angular
-
-        imu.linear_acceleration.x = 0.0
-        imu.linear_acceleration.y = 0.0
-        imu.linear_acceleration.z = 0.0
 
         imu.orientation_covariance[0] = -1.0
         imu.angular_velocity_covariance[0] = -1.0

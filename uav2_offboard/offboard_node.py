@@ -611,9 +611,23 @@ class OffboardNode(Node):
         rate = self.create_rate(10)
         start_time = self.get_clock().now()
         max_timeout = goal_handle.request.timeout
+        max_timeout_out_of_land_mode = 5.0  # seconds
+        is_in_land_mode = False
+        time_elapsed_out_of_land_mode = 0.0
+        start_time_out_of_land_mode = None
 
         self.engage_land_mode()
+        # 1. check we enter land mode before anything else
+        # 2. check if land mode is exited -> if timeout hit before we checked disarm == landing failed
         while rclpy.ok():
+            if (
+                self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND
+                and not is_in_land_mode
+            ):
+                self.get_logger().info("Entered land mode...")
+                is_in_land_mode = True
+                continue
+
             time_elapsed = (self.get_clock().now() - start_time).nanoseconds / 1e9
             if time_elapsed > max_timeout:
                 goal_handle.abort()
@@ -637,7 +651,28 @@ class OffboardNode(Node):
                 self.destroy_rate(rate)
                 return Land.Result(result=result)
 
-            # TODO: add a check for exit land mode currently switch to hold before disarming when landed need figure out how to deal with that
+            if (
+                is_in_land_mode
+                and self.nav_state != VehicleStatus.NAVIGATION_STATE_AUTO_LAND
+                and self.arming_state != VehicleStatus.ARMING_STATE_DISARMED
+                and time_elapsed_out_of_land_mode > max_timeout_out_of_land_mode
+            ):
+                if start_time_out_of_land_mode is None:
+                    start_time_out_of_land_mode = self.get_clock().now()
+
+                time_elapsed_out_of_land_mode = (
+                    self.get_clock().now() - start_time_out_of_land_mode
+                ).nanoseconds / 1e9
+                # we start counting here if we exit land mode before disarm it means landing failed
+                goal_handle.abort()
+                result = GoToResult()
+                result.success = False
+                result.message = f"Landing failed, exited land mode before disarm, exceeded timeout: {max_timeout_out_of_land_mode} seconds"
+                self.get_logger().info(result.message)
+                self.destroy_rate(rate)
+                self.reset_internal_state()
+                return Land.Result(result=result)
+
             feedback_msg = GoToFeedback()
             feedback_msg.current_x = self.current_position[0]
             feedback_msg.current_y = self.current_position[1]
