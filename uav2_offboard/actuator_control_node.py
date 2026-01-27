@@ -39,13 +39,13 @@ class ActuatorControlNode(Node):
             .string_value
         )
 
-        self.actuation_index = (
+        self.actuation_indexes = (
             self.declare_parameter(
-                "actuation_index",
-                value=1,
+                "actuation_indexes",
+                value=[1],
             )
             .get_parameter_value()
-            .integer_value
+            .integer_array_value
         )
 
         self.timeout = (
@@ -112,10 +112,15 @@ class ActuatorControlNode(Node):
             self.get_logger().info("Connection state: not connected")
 
     async def _actuate(self, enable: bool):
-        await self.drone.action.set_actuator(
-            self.actuation_index,
-            self.ON if enable else self.OFF,
-        )
+        tasks = [
+            self.drone.action.set_actuator(
+                idx,
+                self.ON if enable else self.OFF,
+            )
+            for idx in self.actuation_indexes
+        ]
+
+        await asyncio.gather(*tasks)
 
     # --------------------------- ROS Action callbacks ---------------------------
 
@@ -135,11 +140,12 @@ class ActuatorControlNode(Node):
     async def cancel_callback(self, goal_handle):
         goal_id = str(goal_handle.goal_id)
 
-        self.get_logger().info(f"Cancelling goal {goal_id}")
+        self.get_logger().info("Cancelling goal...")
 
         future = self.running_tasks.get(goal_id)
         if future and not future.done():
             future.cancel()
+            del self.running_tasks[goal_id]
 
         if self.connection_future and not self.connection_future.done():
             self.connection_future.cancel()
