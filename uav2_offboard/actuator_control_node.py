@@ -2,7 +2,7 @@
 
 import asyncio
 import threading
-from concurrent.futures import Future
+from concurrent.futures import CancelledError, Future, TimeoutError
 from typing import Dict, Optional
 
 import rclpy
@@ -161,7 +161,7 @@ class ActuatorControlNode(Node):
 
             self.get_logger().info("Waiting for PX4 connection...")
             self.get_logger().info(
-                f"PX4 connection established: {self.connection_future.result(), self.connection_future.done()}"
+                f"PX4 connection established: {self.connection_future.result(timeout=self.timeout), self.connection_future.done()}"
             )
 
             is_connected = self._run_async(self._check_connection()).result(
@@ -186,13 +186,23 @@ class ActuatorControlNode(Node):
             goal_handle.succeed()
             return result
 
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, CancelledError):
+            self.get_logger().error("Actuation cancelled")
             result.message = "Actuation cancelled"
             goal_handle.canceled()
             return result
 
+        except TimeoutError:  # this is from concurrent.futures
+            self.get_logger().error("Actuation timed out")
+            result.message = "Actuation timed out"
+            goal_handle.abort()
+            return result
+
         except Exception as e:
             self.get_logger().error(f"Actuation failed: {e}")
+            import traceback
+
+            traceback.print_exc()
             result.message = f"Error: {e}"
             goal_handle.abort()
             return result
