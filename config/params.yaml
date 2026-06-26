@@ -1,5 +1,8 @@
 /**/offboard_node:
   ros__parameters:
+    # MAVLink system id of the target PX4 instance (MAV_SYS_ID). For PX4 SITL
+    # started with `px4 -i N`, this is N + 1 (so `-i 1` -> 2)
+    mav_sys_id: 1
     offboard_control_mode_topic: /fmu/in/offboard_control_mode
     trajectory_setpoint_topic: /fmu/in/trajectory_setpoint
     vehicle_command_topic: /fmu/in/vehicle_command
