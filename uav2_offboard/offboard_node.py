@@ -70,6 +70,9 @@ class OffboardNode(Node):
             .get_parameter_value()
             .string_value
         )
+        self.mav_sys_id = (
+            self.declare_parameter("mav_sys_id", 1).get_parameter_value().integer_value
+        )
 
         # Create callback group for concurrent execution
         self.callback_group = ReentrantCallbackGroup()
@@ -182,7 +185,7 @@ class OffboardNode(Node):
         msg.param5 = params.get("param5", 0.0)
         msg.param6 = params.get("param6", 0.0)
         msg.param7 = params.get("param7", 0.0)
-        msg.target_system = 1
+        msg.target_system = self.mav_sys_id
         msg.target_component = 1
         msg.source_system = 1
         msg.source_component = 1
