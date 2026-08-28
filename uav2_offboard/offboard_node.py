@@ -117,6 +117,7 @@ class OffboardNode(Node):
         self.nav_state = VehicleStatus.NAVIGATION_STATE_MAX
         self.arming_state = VehicleStatus.ARMING_STATE_DISARMED
         self.current_position = np.array([0.0, 0.0, 0.0])
+        self.current_yaw = 0.0  # radians, NED
         self.position_valid = False
         self.offboard_mode = OffboardMode()
 
@@ -165,6 +166,7 @@ class OffboardNode(Node):
 
         # Goal tracking
         self.absolute_target = None  # Stores the computed absolute target position
+        self.absolute_yaw = None  # Stores the computed absolute target yaw (radians); None = let PX4 handle heading
         self.latest_acceleration_msg = Vector3(x=0.0, y=0.0, z=0.0)
         self.is_goal_active = False
 
@@ -240,8 +242,9 @@ class OffboardNode(Node):
         self.arming_state = msg.arming_state
 
     def local_position_callback(self, msg: VehicleLocalPosition):
-        """Update current position from vehicle"""
+        """Update current position and heading from vehicle"""
         self.current_position = np.array([msg.x, msg.y, msg.z])
+        self.current_yaw = msg.heading  # radians, NED
         self.position_valid = True
 
     def acceleration_callback(self, msg: Vector3):
@@ -289,7 +292,10 @@ class OffboardNode(Node):
         trajectory_msg.position[0] = self.absolute_target[0]
         trajectory_msg.position[1] = self.absolute_target[1]
         trajectory_msg.position[2] = self.absolute_target[2]
-        trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
+        if self.absolute_yaw is not None:
+            trajectory_msg.yaw = self.absolute_yaw
+        else:
+            trajectory_msg.yaw = float("nan")  # Let PX4 handle yaw
         self.publisher_trajectory.publish(trajectory_msg)
 
     def publish_acceleration_setpoint(self):
@@ -437,6 +443,10 @@ class OffboardNode(Node):
             self.get_logger().warn("Invalid thresholds, must be positive")
             return False
 
+        if goal.specified_yaw and goal.yaw_threshold <= 0:
+            self.get_logger().warn("Invalid yaw_threshold, must be positive")
+            return False
+
         if self.is_goal_active:
             self.get_logger().warn("Another goal is in progress; rejecting...")
             return False
@@ -481,6 +491,11 @@ class OffboardNode(Node):
         self.get_logger().info("Received cancel request")
         return CancelResponse.ACCEPT
 
+    @staticmethod
+    def _wrap_angle(angle: float) -> float:
+        """Wrap an angle to the interval [-pi, pi]."""
+        return (angle + np.pi) % (2 * np.pi) - np.pi
+
     async def execute_callback(
         self,
         goal_handle,
@@ -516,6 +531,21 @@ class OffboardNode(Node):
                 f"Absolute mode: target=({self.absolute_target[0]:.2f}, {self.absolute_target[1]:.2f}, {self.absolute_target[2]:.2f})"
             )
 
+        # Compute absolute target yaw from relative or absolute goal.
+        # Wrap to [-pi, pi] to match TrajectorySetpoint.yaw's documented range.
+        if goal.specified_yaw:
+            if goal.relative:
+                self.absolute_yaw = self._wrap_angle(self.current_yaw + goal.yaw)
+            else:
+                self.absolute_yaw = self._wrap_angle(goal.yaw)
+            self.get_logger().info(
+                f"Yaw mode={'relative' if goal.relative else 'absolute'}: "
+                f"current_yaw={self.current_yaw:.2f} rad, goal_yaw={goal.yaw:.2f} rad, "
+                f"absolute_yaw={self.absolute_yaw:.2f} rad"
+            )
+        else:
+            self.absolute_yaw = None
+
         rate = self.create_rate(20)
 
         while rclpy.ok():
@@ -543,12 +573,23 @@ class OffboardNode(Node):
             y_error = abs(distance_vector[1])
             z_error = abs(distance_vector[2])
 
+            # Calculate heading error (wrapped to [-pi, pi]); 0.0 when yaw not commanded
+            yaw_error = 0.0
+            if goal.specified_yaw and self.absolute_yaw is not None:
+                yaw_error = abs(self._wrap_angle(self.absolute_yaw - self.current_yaw))
+
             # Publish feedback
             feedback_msg = GoToFeedback()
             feedback_msg.current_x = self.current_position[0]
             feedback_msg.current_y = self.current_position[1]
             feedback_msg.current_z = self.current_position[2]
             feedback_msg.distance_to_goal = float(distance_to_goal)
+            if goal.specified_yaw:
+                feedback_msg.current_yaw = self.current_yaw
+                feedback_msg.yaw_error = float(yaw_error)
+            else:
+                feedback_msg.current_yaw = float("nan")
+                feedback_msg.yaw_error = float("nan")
             publish_feedback_fn(feedback_msg)
 
             # Check if goal is reached
@@ -556,6 +597,7 @@ class OffboardNode(Node):
                 x_error <= goal.x_threshold
                 and y_error <= goal.y_threshold
                 and z_error <= goal.z_threshold
+                and yaw_error <= goal.yaw_threshold
             ):
                 goal_handle.succeed()
                 result = GoToResult()
@@ -709,6 +751,7 @@ class OffboardNode(Node):
     def reset_internal_state(self):
         """Reset internal state variables"""
         self.absolute_target = None
+        self.absolute_yaw = None
         self.is_goal_active = False
 
 

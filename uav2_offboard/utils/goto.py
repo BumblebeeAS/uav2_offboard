@@ -21,6 +21,9 @@ class GeneralGoal:
     y_threshold: float
     z_threshold: float
     relative: bool = True
+    specified_yaw: bool = False
+    yaw: float = 0.0
+    yaw_threshold: float = 0.1
 
     @staticmethod
     def from_position_goal(position_goal: GoToPosition.Goal) -> "GeneralGoal":
@@ -32,6 +35,9 @@ class GeneralGoal:
             y_threshold=position_goal.y_threshold,
             z_threshold=position_goal.z_threshold,
             relative=position_goal.relative,
+            specified_yaw=position_goal.specified_yaw,
+            yaw=position_goal.yaw,
+            yaw_threshold=position_goal.yaw_threshold,
         )
 
     @staticmethod
